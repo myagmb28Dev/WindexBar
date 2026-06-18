@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "CodexBar.Windows (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "CodexBar.Windows (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

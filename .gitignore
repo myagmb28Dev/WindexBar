@@ -1,0 +1,9 @@
+﻿bin/
+obj/
+.vs/
+*.user
+*.suo
+TestResults/
+.dotnet/
+dotnet-install.ps1
+.codex/

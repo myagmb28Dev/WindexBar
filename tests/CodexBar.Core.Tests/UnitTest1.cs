@@ -1,0 +1,316 @@
+using CodexBar.Core.Config;
+using CodexBar.Core.Models;
+using CodexBar.Core.Providers;
+using CodexBar.Core.Providers.Codex;
+using CodexBar.Core.Refresh;
+using System.Text.Json;
+
+namespace CodexBar.Core.Tests;
+
+public sealed class CodexRpcClientTests
+{
+    [Fact]
+    public async Task FetchesRateLimitsAndAccountFromLineBasedJsonRpc()
+    {
+        var transport = new FakeCodexRpcTransport(
+            OnRequest(1, new { ok = true }),
+            OnRequest(2, new
+            {
+                rateLimits = new
+                {
+                    primary = new { usedPercent = 25.0, windowDurationMins = 300, resetsAt = 1_800_000_000 },
+                    secondary = new { usedPercent = 40.0, windowDurationMins = 10080, resetsAt = 1_800_100_000 },
+                    credits = new { hasCredits = true, unlimited = false, balance = "123.5" },
+                    planType = "plus"
+                }
+            }),
+            OnRequest(3, new { account = new { type = "chatgpt", email = "me@example.com", planType = "team" } }));
+
+        await using var client = new CodexRpcClient(transport, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        await client.InitializeAsync(CancellationToken.None);
+        var limits = await client.FetchRateLimitsAsync(CancellationToken.None);
+        var account = await client.FetchAccountAsync(CancellationToken.None);
+        var usage = CodexUsageMapper.MapUsage(limits.RateLimits, account, DateTimeOffset.UnixEpoch)!;
+        var credits = CodexUsageMapper.MapCredits(limits.RateLimits.Credits, DateTimeOffset.UnixEpoch)!;
+
+        Assert.Equal(25, usage.Primary!.UsedPercent);
+        Assert.Equal(75, usage.Primary.RemainingPercent);
+        Assert.Equal(300, usage.Primary.WindowMinutes);
+        Assert.Equal("me@example.com", usage.Identity!.AccountEmail);
+        Assert.Equal("team", usage.Identity.LoginMethod);
+        Assert.Equal(123.5, credits.Remaining, 3);
+        Assert.Contains("initialized", transport.Writes[1], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ThrowsTimeoutForMissingReply()
+    {
+        var transport = new FakeCodexRpcTransport();
+        await using var client = new CodexRpcClient(transport, TimeSpan.FromMilliseconds(20), TimeSpan.FromMilliseconds(20));
+
+        await Assert.ThrowsAsync<CodexRpcTimeoutException>(() => client.InitializeAsync(CancellationToken.None));
+        Assert.True(transport.Killed);
+    }
+
+    [Fact]
+    public async Task ThrowsForMalformedJson()
+    {
+        var transport = new FakeCodexRpcTransport("not json");
+        await using var client = new CodexRpcClient(transport, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+
+        var error = await Assert.ThrowsAsync<CodexRpcException>(() => client.InitializeAsync(CancellationToken.None));
+        Assert.Contains("malformed", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string OnRequest(int id, object result) =>
+        System.Text.Json.JsonSerializer.Serialize(new { id, result });
+}
+
+public sealed class MappingTests
+{
+    [Fact]
+    public void MapsRpcWindowAndCredits()
+    {
+        var window = CodexUsageMapper.MapWindow(new RpcRateLimitWindow
+        {
+            UsedPercent = 12.5,
+            WindowDurationMins = 300,
+            ResetsAt = 1_800_000_000
+        });
+        var credits = CodexUsageMapper.MapCredits(new RpcCreditsSnapshot { Balance = "42" }, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(87.5, window!.RemainingPercent);
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1_800_000_000), window.ResetsAt);
+        Assert.Equal(42, credits!.Remaining);
+    }
+
+    [Fact]
+    public void MapsUnknownRateLimitWindowForSparkWindow()
+    {
+        var response = JsonSerializer.Deserialize<RpcRateLimitsResponse>(JsonSerializer.Serialize(new
+        {
+            rateLimits = new Dictionary<string, object?>
+            {
+                ["gpt-5.3-codex-spark"] = new
+                {
+                    usedPercent = 9.0,
+                    windowDurationMins = 120,
+                    resetsAt = 1_800_002_000L
+                },
+                ["planType"] = "plus",
+                ["credits"] = new { hasCredits = true, unlimited = false, balance = "1" }
+            }
+        }))!;
+
+        var usage = CodexUsageMapper.MapUsage(response.RateLimits, null, DateTimeOffset.UnixEpoch)!;
+
+        Assert.NotNull(usage.Identity);
+        Assert.Equal("plus", usage.Identity.LoginMethod);
+        Assert.NotNull(usage.Primary);
+        Assert.Equal(9, usage.Primary.UsedPercent);
+        Assert.Equal(120, usage.Primary.WindowMinutes);
+    }
+
+    [Fact]
+    public void MissingExecutableReturnsNull()
+    {
+        var path = CommandLocator.ResolveExecutable("definitely-not-codexbar-test-command", new Dictionary<string, string>
+        {
+            ["PATH"] = "C:\\no-such-dir",
+            ["PATHEXT"] = ".EXE;.CMD"
+        });
+
+        Assert.Null(path);
+    }
+}
+
+public sealed class ConfigTests
+{
+    [Fact]
+    public void CreatesAndPersistsDefaultConfig()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
+        var store = new CodexBarConfigStore(path);
+        var config = store.LoadOrCreateDefault();
+        config.SetProviderConfig(new ProviderConfig { Id = "codex", Enabled = false });
+        store.Save(config);
+
+        var reloaded = store.LoadOrCreateDefault();
+
+        Assert.True(File.Exists(path));
+        Assert.False(reloaded.GetProviderConfig(UsageProvider.Codex).Enabled);
+        Assert.False(reloaded.ClickThroughHud);
+    }
+
+    [Fact]
+    public void PreservesSavedClickThroughHudValue()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, """
+        {
+          "version": 1,
+          "clickThroughHud": true,
+          "providers": [
+            { "id": "codex", "enabled": true, "source": "cli" }
+          ]
+        }
+        """);
+        var store = new CodexBarConfigStore(path);
+
+        var config = store.LoadOrCreateDefault();
+
+        Assert.Equal(CodexBarConfig.CurrentVersion, config.Version);
+        Assert.True(config.ClickThroughHud);
+    }
+}
+
+public sealed class UsageStoreTests
+{
+    [Fact]
+    public async Task ManualRefreshUpdatesSnapshot()
+    {
+        var settings = TestSettings();
+        var descriptor = TestDescriptor(FetchResult(10, 55));
+        var store = new UsageStore(settings, descriptor);
+
+        await store.RefreshAsync(CancellationToken.None);
+
+        Assert.Null(store.LastError);
+        Assert.Equal(90, store.Snapshot!.Primary!.RemainingPercent);
+        Assert.Equal(55, store.Credits!.Remaining);
+    }
+
+    [Fact]
+    public async Task FailurePreservesStaleSnapshot()
+    {
+        var settings = TestSettings();
+        var descriptor = TestDescriptor(FetchResult(10, 0), new InvalidOperationException("boom"));
+        var store = new UsageStore(settings, descriptor);
+        await store.RefreshAsync(CancellationToken.None);
+        var stale = store.Snapshot;
+
+        await store.RefreshAsync(CancellationToken.None);
+
+        Assert.Same(stale, store.Snapshot);
+        Assert.Equal("boom", store.LastError);
+    }
+
+    [Fact]
+    public async Task DisabledProviderClearsState()
+    {
+        var settings = TestSettings();
+        settings.UpdateCodex(c => c.Enabled = false);
+        var store = new UsageStore(settings, CodexProviderDescriptor.Create(new QueueCodexRpcTransportFactory(Array.Empty<string[]>())));
+
+        await store.RefreshAsync(CancellationToken.None);
+
+        Assert.Null(store.Snapshot);
+        Assert.Null(store.LastError);
+    }
+
+    private static SettingsStore TestSettings()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
+        return new SettingsStore(new CodexBarConfigStore(path));
+    }
+
+    private static ProviderDescriptor TestDescriptor(params object[] outcomes) => new(
+        UsageProvider.Codex,
+        "Codex",
+        "Session",
+        "Weekly",
+        "codex",
+        true,
+        new ProviderFetchPipeline([new QueueProviderFetchStrategy(outcomes)]));
+
+    private static ProviderFetchResult FetchResult(double usedPercent, double creditsRemaining)
+    {
+        var now = DateTimeOffset.UnixEpoch;
+        var usage = new UsageSnapshot(
+            new RateWindow(usedPercent, 300, DateTimeOffset.FromUnixTimeSeconds(1_800_000_000), "in 1h"),
+            null,
+            null,
+            now,
+            new ProviderIdentitySnapshot(UsageProvider.Codex, "me@example.com", null, "plus"));
+        var credits = new CreditsSnapshot(creditsRemaining, Array.Empty<CreditEvent>(), now);
+        return new ProviderFetchResult(usage, credits, "test", "test", ProviderFetchKind.LocalProbe);
+    }
+}
+
+internal sealed class QueueProviderFetchStrategy : IProviderFetchStrategy
+{
+    private readonly Queue<object> _outcomes;
+
+    public QueueProviderFetchStrategy(IEnumerable<object> outcomes)
+    {
+        _outcomes = new Queue<object>(outcomes);
+    }
+
+    public string Id => "test";
+    public ProviderFetchKind Kind => ProviderFetchKind.LocalProbe;
+
+    public Task<bool> IsAvailableAsync(ProviderFetchContext context, CancellationToken cancellationToken) => Task.FromResult(true);
+
+    public Task<ProviderFetchResult> FetchAsync(ProviderFetchContext context, CancellationToken cancellationToken)
+    {
+        var outcome = _outcomes.Dequeue();
+        if (outcome is Exception error)
+        {
+            throw error;
+        }
+
+        return Task.FromResult((ProviderFetchResult)outcome);
+    }
+
+    public bool ShouldFallback(Exception error, ProviderFetchContext context) => false;
+}
+
+internal sealed class QueueCodexRpcTransportFactory : ICodexRpcTransportFactory
+{
+    private readonly Queue<string[]> _sessions;
+
+    public QueueCodexRpcTransportFactory(IEnumerable<string[]> sessions)
+    {
+        _sessions = new Queue<string[]>(sessions);
+    }
+
+    public ICodexRpcTransport Start(string executablePath, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> environment)
+    {
+        return new FakeCodexRpcTransport(_sessions.Count > 0 ? _sessions.Dequeue() : Array.Empty<string>());
+    }
+}
+
+internal sealed class FakeCodexRpcTransport : ICodexRpcTransport
+{
+    private readonly Queue<string> _replies;
+
+    public FakeCodexRpcTransport(params string[] replies)
+    {
+        _replies = new Queue<string>(replies);
+    }
+
+    public List<string> Writes { get; } = [];
+    public bool Killed { get; private set; }
+
+    public Task WriteLineAsync(string line, CancellationToken cancellationToken)
+    {
+        Writes.Add(line);
+        return Task.CompletedTask;
+    }
+
+    public async Task<string?> ReadLineAsync(CancellationToken cancellationToken)
+    {
+        if (_replies.Count > 0)
+        {
+            return _replies.Dequeue();
+        }
+
+        await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        return null;
+    }
+
+    public void Kill() => Killed = true;
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+}
