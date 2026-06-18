@@ -321,8 +321,6 @@ try {
         'true',
         '-p:WindowsPackageType=None',
         '-p:WindowsAppSDKSelfContained=true',
-        '-p:PublishSingleFile=true',
-        '-p:IncludeNativeLibrariesForSelfExtract=true',
         '-p:PublishReadyToRun=false',
         '-p:PublishTrimmed=false',
         '-p:NuGetAudit=false',
@@ -338,7 +336,13 @@ try {
     Invoke-WithProgress -FilePath $dotnet -Arguments $publishArgs -Label 'Building app' -StartPercent 10 -EndPercent 52 -LogPath $logPath
     if (Test-Path -LiteralPath $SignScriptSource) {
         Write-Bar 55 'Signing app'
-        & $SignScriptSource -Path (Join-Path $PublishDir 'WindexBar.Windows.exe') -WarnOnly
+        $signTargets = @(
+            Get-ChildItem -LiteralPath $PublishDir -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -like 'WindexBar*.exe' -or $_.Name -like 'WindexBar*.dll' }
+        )
+        if ($signTargets.Count -gt 0) {
+            & $SignScriptSource -Path $signTargets.FullName -WarnOnly
+        }
     }
 
     Stop-RunningApp

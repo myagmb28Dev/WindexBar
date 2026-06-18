@@ -31,10 +31,10 @@ if not exist "%PUBLISH_DIR%" mkdir "%PUBLISH_DIR%"
 if not exist "%INSTALLER_DIR%" mkdir "%INSTALLER_DIR%"
 if not exist "%INNO_OUTPUT_DIR%" mkdir "%INNO_OUTPUT_DIR%"
 
-"%ROOT%.dotnet\dotnet.exe" publish "%ROOT%src\WindexBar.Windows\WindexBar.Windows.csproj" -c Release -r win-x64 --self-contained true -p:WindowsPackageType=None -p:WindowsAppSDKSelfContained=true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:PublishReadyToRun=false -p:PublishTrimmed=false -p:NuGetAudit=false -o "%PUBLISH_DIR%"
+"%ROOT%.dotnet\dotnet.exe" publish "%ROOT%src\WindexBar.Windows\WindexBar.Windows.csproj" -c Release -r win-x64 --self-contained true -p:WindowsPackageType=None -p:WindowsAppSDKSelfContained=true -p:PublishReadyToRun=false -p:PublishTrimmed=false -p:NuGetAudit=false -o "%PUBLISH_DIR%"
 if errorlevel 1 exit /b %errorlevel%
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%scripts\sign-app.ps1" -Path "%PUBLISH_DIR%\WindexBar.Windows.exe" -WarnOnly
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$files = Get-ChildItem -LiteralPath '%PUBLISH_DIR%' -File | Where-Object { $_.Name -like 'WindexBar*.exe' -or $_.Name -like 'WindexBar*.dll' }; if ($files) { & '%ROOT%scripts\sign-app.ps1' -Path $files.FullName -WarnOnly }"
 if errorlevel 1 exit /b %errorlevel%
 
 "%ISCC%" "%ISS_FILE%" "/DSourceDir=%PUBLISH_DIR%" "/DOutputDir=%INNO_OUTPUT_DIR%" "/DSetupIconFile=%SETUP_ICON%"
