@@ -235,7 +235,7 @@ function New-AppShortcut {
     $shortcut.TargetPath = $TargetPath
     $shortcut.WorkingDirectory = $WorkingDirectory
     if (Test-Path -LiteralPath $IconPath) {
-        $shortcut.IconLocation = $IconPath
+        $shortcut.IconLocation = "$IconPath,0"
     }
     $shortcut.Save()
 }
@@ -344,7 +344,7 @@ try {
     Stop-RunningApp
     Copy-PublishedFiles -Source $PublishDir -Destination $InstallDir -StartPercent 58 -EndPercent 86
 
-    $iconPath = Join-Path $InstallDir 'Assets\TrayIcon.ico'
+    $iconPath = $AppExe
     Write-Bar 90 'Creating shortcuts'
     New-AppShortcut -ShortcutPath $StartMenuShortcut -TargetPath $AppExe -WorkingDirectory $InstallDir -IconPath $iconPath
     if (-not $NoStartup) {

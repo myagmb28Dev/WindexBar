@@ -26,7 +26,7 @@ ArchitecturesInstallIn64BitMode=x64
 OutputDir={#OutputDir}
 OutputBaseFilename=WindexBarSetup
 SetupIconFile={#SetupIconFile}
-UninstallDisplayIcon={app}\Assets\TrayIcon.ico
+UninstallDisplayIcon={app}\{#AppExeName}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -48,9 +48,9 @@ Type: filesandordirs; Name: "{userstartup}\WindexBar.lnk"
 Type: filesandordirs; Name: "{userdesktop}\WindexBar.lnk"
 
 [Icons]
-Name: "{group}\WindexBar"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\TrayIcon.ico"
-Name: "{userstartup}\WindexBar"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\TrayIcon.ico"; Tasks: startup
-Name: "{userdesktop}\WindexBar"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\TrayIcon.ico"; Tasks: desktopicon
+Name: "{group}\WindexBar"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppExeName}"
+Name: "{userstartup}\WindexBar"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppExeName}"; Tasks: startup
+Name: "{userdesktop}\WindexBar"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "Launch WindexBar"; Flags: nowait postinstall skipifsilent
