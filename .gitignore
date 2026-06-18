@@ -7,3 +7,6 @@ TestResults/
 .dotnet/
 dotnet-install.ps1
 .codex/
+.tmp*/
+build-log.txt
+check.log
