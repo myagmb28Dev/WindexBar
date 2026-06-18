@@ -2,10 +2,11 @@
 setlocal
 
 set "ROOT=%~dp0"
-set "PUBLISH_DIR=%ROOT%artifacts\publish\win-x64"
+set "PUBLISH_ROOT=%ROOT%artifacts\publish"
 set "ISS_FILE=%ROOT%installer\WindexBar.iss"
 set "SETUP_ICON=%ROOT%src\WindexBar.Windows\Assets\TrayIcon.ico"
 for /f "usebackq delims=" %%T in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Date -Format 'yyyyMMdd-HHmmss'"`) do set "BUILD_STAMP=%%T"
+set "PUBLISH_DIR=%PUBLISH_ROOT%\%BUILD_STAMP%\win-x64"
 set "INSTALLER_DIR=%ROOT%artifacts\installer\%BUILD_STAMP%"
 set "INNO_OUTPUT_DIR=%TEMP%\WindexBarInstaller\%BUILD_STAMP%"
 set "ISCC="
@@ -26,10 +27,8 @@ if not defined ISCC (
     exit /b 1
 )
 
-if exist "%PUBLISH_DIR%" rmdir /S /Q "%PUBLISH_DIR%"
-if not exist "%PUBLISH_DIR%" mkdir "%PUBLISH_DIR%"
-if not exist "%INSTALLER_DIR%" mkdir "%INSTALLER_DIR%"
-if not exist "%INNO_OUTPUT_DIR%" mkdir "%INNO_OUTPUT_DIR%"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = 'Stop'; New-Item -ItemType Directory -Path '%PUBLISH_DIR%' -Force | Out-Null; New-Item -ItemType Directory -Path '%INSTALLER_DIR%' -Force | Out-Null; New-Item -ItemType Directory -Path '%INNO_OUTPUT_DIR%' -Force | Out-Null"
+if errorlevel 1 exit /b %errorlevel%
 
 "%ROOT%.dotnet\dotnet.exe" publish "%ROOT%src\WindexBar.Windows\WindexBar.Windows.csproj" -c Release -r win-x64 --self-contained true -p:WindowsPackageType=None -p:WindowsAppSDKSelfContained=true -p:PublishReadyToRun=false -p:PublishTrimmed=false -p:NuGetAudit=false -o "%PUBLISH_DIR%"
 if errorlevel 1 exit /b %errorlevel%
