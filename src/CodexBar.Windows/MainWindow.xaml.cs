@@ -17,7 +17,7 @@ public sealed partial class MainWindow : Window
     private const double HudClientWidth = 265;
     private const double HudClientHeight = 240;
     private const double SettingsClientWidth = HudClientWidth;
-    private const double SettingsClientHeight = 204;
+    private const double SettingsClientHeight = 152;
     private const double KeyboardScrollStep = 36;
 
     private readonly UsageStore _usageStore;
@@ -78,8 +78,7 @@ public sealed partial class MainWindow : Window
     public void ShowSettingsView()
     {
         Title = "Win CodexBar Settings";
-        CodexEnabledCheckBox.IsChecked = _settingsStore.Codex.Enabled;
-        RefreshIntervalSecondsNumberBox.Value = _settingsStore.Codex.RefreshIntervalSeconds;
+        RefreshIntervalSecondsTextBox.Text = _settingsStore.Codex.RefreshIntervalSeconds.ToString();
         HudView.Visibility = Visibility.Collapsed;
         SettingsView.Visibility = Visibility.Visible;
         ResizeForCurrentView();
@@ -247,7 +246,6 @@ public sealed partial class MainWindow : Window
     {
         _settingsStore.UpdateCodex(c =>
         {
-            c.Enabled = CodexEnabledCheckBox.IsChecked == true;
             c.RefreshIntervalSeconds = ReadRefreshIntervalSeconds();
         });
         _usageStore.StartBackgroundRefresh();
@@ -256,14 +254,13 @@ public sealed partial class MainWindow : Window
 
     private int ReadRefreshIntervalSeconds()
     {
-        var value = RefreshIntervalSecondsNumberBox.Value;
-        if (double.IsNaN(value))
+        if (!int.TryParse(RefreshIntervalSecondsTextBox.Text, out var value))
         {
             return CodexBarConfig.DefaultRefreshIntervalSeconds;
         }
 
-        return (int)Math.Clamp(
-            Math.Round(value),
+        return Math.Clamp(
+            value,
             CodexBarConfig.MinRefreshIntervalSeconds,
             CodexBarConfig.MaxRefreshIntervalSeconds);
     }

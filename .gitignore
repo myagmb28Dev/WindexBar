@@ -10,3 +10,5 @@ dotnet-install.ps1
 .tmp*/
 build-log.txt
 check.log
+artifacts/
+.certs/
