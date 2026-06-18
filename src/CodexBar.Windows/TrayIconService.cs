@@ -117,10 +117,13 @@ public sealed class TrayIconService : IDisposable
 
     private static Drawing.Icon LoadIcon()
     {
-        var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
-        if (File.Exists(iconPath))
+        foreach (var fileName in new[] { "TrayIcon.ico", "AppIcon.ico" })
         {
-            return new Drawing.Icon(iconPath);
+            var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", fileName);
+            if (File.Exists(iconPath))
+            {
+                return new Drawing.Icon(iconPath);
+            }
         }
 
         return Drawing.SystemIcons.Application;

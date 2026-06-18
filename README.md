@@ -1,27 +1,39 @@
-﻿# Win-CodexBar
+# Win CodexBar
 
-Windows-first CodexBar v1 implementation. The first vertical slice supports Codex usage in a Windows system tray app plus a small CLI.
+Win CodexBar는 현재 Codex 세션의 사용량 한도를 Windows 트레이에서 확인하는 작은 앱입니다.
 
-## Toolchain
+## 설치 방법
 
-This repo carries a local .NET SDK under `.dotnet/` when bootstrapped by Codex. Use it explicitly if `dotnet` is not on PATH:
+### Release
 
-```powershell
-.\.dotnet\dotnet.exe --info
-```
+터미널을 쓰지 않는 일반 사용자용 설치 방법입니다.
 
-## Build and test
+GitHub Release에서 `WinCodexBarSetup.exe`를 내려받아 실행하세요.
 
-```powershell
-.\.dotnet\dotnet.exe test .\WinCodexBar.slnx
-.\.dotnet\dotnet.exe build .\WinCodexBar.slnx
-```
+### winget
 
-## Run
+터미널에서 명령줄로 설치하려는 사용자용 설치 방법입니다.
 
 ```powershell
-.\.dotnet\dotnet.exe run --project .\src\CodexBar.Cli -- usage --provider codex --json
-.\.dotnet\dotnet.exe run --project .\src\CodexBar.Windows
+winget install --id WinCodexBar.WinCodexBar -e
 ```
 
-The Windows app opens the Codex status window on launch and also stays available in the system tray. Left-click the tray icon to reopen the status window; right-click opens Refresh, Settings, and Quit.
+### 소스에서 설치
+
+이 저장소를 clone 받은 개발자/기여자용 설치 방법입니다.
+
+```powershell
+.\install.cmd
+```
+
+## 사용
+
+설치 후 앱은 시스템 트레이에 남아 있습니다. 트레이 아이콘을 왼쪽 클릭하면 상태 창을 열고, 오른쪽 클릭하면 Settings와 Quit을 사용할 수 있습니다.
+
+## 개발 실행
+
+소스에서 바로 실행하려면:
+
+```powershell
+.\run.cmd
+```

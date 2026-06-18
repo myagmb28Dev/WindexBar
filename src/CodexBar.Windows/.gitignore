@@ -29,15 +29,6 @@ artifacts/
 *.nuget.targets
 project.lock.json
 
-# MSIX packaging output
-AppPackages/
-BundleArtifacts/
-*.msix
-*.msixupload
-*.appx
-*.appxbundle
-*.appxupload
-
 # Publish output
 publish/
 *.pubxml

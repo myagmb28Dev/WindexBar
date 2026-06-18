@@ -10,8 +10,7 @@
     <PublishProfile Condition="Exists('Properties\PublishProfiles\win-$(Platform).pubxml')">win-$(Platform).pubxml</PublishProfile>
     <UseWinUI>true</UseWinUI>
     <WinUISDKReferences>false</WinUISDKReferences>
-    <EnableMsixTooling>true</EnableMsixTooling>
-    <WindowsPackageType Condition="'$(EnableMsixPackaging)' != 'true'">None</WindowsPackageType>
+    <WindowsPackageType>None</WindowsPackageType>
     <EnableWinAppRunSupport>false</EnableWinAppRunSupport>
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -27,19 +26,13 @@
     <Content Include="Assets\Square44x44Logo.targetsize-48_altform-lightunplated.png" />
     <Content Include="Assets\StoreLogo.png" />
     <Content Include="Assets\AppIcon.ico" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\TrayIcon.ico" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\TrayIcon.png" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\Wide310x150Logo.scale-200.png" />
   </ItemGroup>
 
   <ItemGroup>
     <Manifest Include="$(ApplicationManifest)" />
-  </ItemGroup>
-
-  <ItemGroup Condition="'$(EnableMsixPackaging)' == 'true'">
-    <AppxManifest Include="Package.appxmanifest" />
-  </ItemGroup>
-
-  <ItemGroup Condition="'$(DisableMsixProjectCapabilityAddedByProject)'!='true' and '$(EnableMsixTooling)'=='true'">
-    <ProjectCapability Include="Msix" />
   </ItemGroup>
 
   <ItemGroup>
@@ -53,10 +46,6 @@
   <ItemGroup>
     <ProjectReference Include="..\CodexBar.Core\CodexBar.Core.csproj" />
   </ItemGroup>
-
-  <PropertyGroup Condition="'$(DisableHasPackageAndPublishMenuAddedByProject)'!='true' and '$(EnableMsixTooling)'=='true'">
-    <HasPackageAndPublishMenu>true</HasPackageAndPublishMenu>
-  </PropertyGroup>
 
   <PropertyGroup>
     <PublishReadyToRun Condition="'$(Configuration)' == 'Debug'">False</PublishReadyToRun>
