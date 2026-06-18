@@ -215,6 +215,45 @@ public sealed class MappingTests
     }
 
     [Fact]
+    public void GroupsReasoningBucketsByModelVersion()
+    {
+        var response = JsonSerializer.Deserialize<RpcRateLimitsResponse>(JsonSerializer.Serialize(new
+        {
+            rateLimits = new { },
+            rateLimitsByLimitId = new Dictionary<string, object?>
+            {
+                ["gpt-5.5-xhigh"] = new
+                {
+                    limitId = "gpt-5.5-xhigh",
+                    limitName = "GPT-5.5 Extra High Reasoning",
+                    primary = new { usedPercent = 10.0, windowDurationMins = 300, resetsAt = 1_800_000_000L }
+                },
+                ["gpt-5.5-low"] = new
+                {
+                    limitId = "gpt-5.5-low",
+                    limitName = "GPT-5.5 Low Reasoning",
+                    secondary = new { usedPercent = 22.0, windowDurationMins = 10080, resetsAt = 1_800_100_000L }
+                },
+                ["gpt-5.4-high"] = new
+                {
+                    limitId = "gpt-5.4-high",
+                    limitName = "GPT-5.4 High Reasoning",
+                    primary = new { usedPercent = 30.0, windowDurationMins = 300, resetsAt = 1_800_200_000L }
+                }
+            }
+        }))!;
+
+        var usage = CodexUsageMapper.MapUsage(response, null, DateTimeOffset.UnixEpoch)!;
+
+        Assert.Equal(2, usage.Models!.Count);
+        Assert.Equal("GPT-5.5 XHigh", usage.Models[0].ModelName);
+        Assert.Equal(10, usage.Models[0].Current!.UsedPercent);
+        Assert.Equal(22, usage.Models[0].Weekly!.UsedPercent);
+        Assert.Equal("GPT-5.4 High", usage.Models[1].ModelName);
+        Assert.Equal(30, usage.Models[1].Current!.UsedPercent);
+    }
+
+    [Fact]
     public void MissingExecutableReturnsNull()
     {
         var path = CommandLocator.ResolveExecutable("definitely-not-codexbar-test-command", new Dictionary<string, string>
@@ -295,7 +334,7 @@ public sealed class CodexSessionStateReaderTests
         Assert.NotNull(selection);
         Assert.Equal("gpt-5.5", selection!.Model);
         Assert.Equal("xhigh", selection.ReasoningEffort);
-        Assert.Equal("GPT-5.5 Extra High Reasoning", selection.DisplayName);
+        Assert.Equal("GPT-5.5 XHigh", selection.DisplayName);
     }
 
     [Fact]
@@ -316,7 +355,7 @@ public sealed class CodexSessionStateReaderTests
         Assert.NotNull(selection);
         Assert.Equal("gpt-5.4", selection!.Model);
         Assert.Equal("low", selection.ReasoningEffort);
-        Assert.Equal("GPT-5.4 Low Reasoning", selection.DisplayName);
+        Assert.Equal("GPT-5.4 Low", selection.DisplayName);
     }
 
     [Fact]
@@ -337,7 +376,7 @@ public sealed class CodexSessionStateReaderTests
         Assert.NotNull(selection);
         Assert.Equal("gpt-5.3-codex-spark", selection!.Model);
         Assert.Equal("xhigh", selection.ReasoningEffort);
-        Assert.Equal("GPT-5.3 Codex Spark Extra High Reasoning", selection.DisplayName);
+        Assert.Equal("GPT-5.3 Codex Spark XHigh", selection.DisplayName);
     }
 
     [Fact]
@@ -377,7 +416,7 @@ public sealed class CodexSessionStateReaderTests
         var selection = CodexSessionStateReader.ReadLatest(TestEnvironment(codexHome));
 
         Assert.NotNull(selection);
-        Assert.Equal("GPT-5.5 High Reasoning", selection!.DisplayName);
+        Assert.Equal("GPT-5.5 High", selection!.DisplayName);
     }
 
     private static IReadOnlyDictionary<string, string> TestEnvironment(string codexHome) => new Dictionary<string, string>

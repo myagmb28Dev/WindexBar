@@ -508,11 +508,61 @@ public sealed partial class MainWindow : Window
 
     private static string NormalizeModelKey(string value)
     {
-        var chars = value
+        var chars = StripReasoningSuffix(value)
             .Where(char.IsLetterOrDigit)
             .Select(char.ToLowerInvariant)
             .ToArray();
         return new string(chars);
+    }
+
+    private static string StripReasoningSuffix(string value)
+    {
+        var trimmed = value.Replace('_', ' ').Replace('-', ' ').Trim();
+        var suffixes = new[]
+        {
+            " extra high reasoning effort",
+            " extra high reasoning",
+            " xhigh reasoning effort",
+            " xhigh reasoning",
+            " high reasoning effort",
+            " high reasoning",
+            " medium reasoning effort",
+            " medium reasoning",
+            " low reasoning effort",
+            " low reasoning",
+            " minimal reasoning effort",
+            " minimal reasoning",
+            " no reasoning",
+            " none reasoning",
+            " extra high",
+            " xhigh",
+            " high",
+            " medium",
+            " low",
+            " minimal",
+            " none",
+            " reasoning effort",
+            " reasoning"
+        };
+
+        var changed = true;
+        while (changed)
+        {
+            changed = false;
+            foreach (var suffix in suffixes)
+            {
+                if (!trimmed.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                trimmed = trimmed[..^suffix.Length].Trim();
+                changed = true;
+                break;
+            }
+        }
+
+        return trimmed;
     }
 
     private string FormatHudMeta(UsageSnapshot? snapshot, bool disabled)

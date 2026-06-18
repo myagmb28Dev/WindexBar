@@ -623,12 +623,12 @@ public static class CodexSessionStateReader
     {
         return NormalizeEffort(effort) switch
         {
-            "xhigh" => "Extra High Reasoning",
-            "high" => "High Reasoning",
-            "medium" => "Medium Reasoning",
-            "low" => "Low Reasoning",
-            "minimal" => "Minimal Reasoning",
-            "none" => "No Reasoning",
+            "xhigh" => "XHigh",
+            "high" => "High",
+            "medium" => "Medium",
+            "low" => "Low",
+            "minimal" => "Minimal",
+            "none" => "None",
             _ => null
         };
     }

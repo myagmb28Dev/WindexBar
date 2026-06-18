@@ -7,6 +7,32 @@ namespace CodexBar.Core.Providers.Codex;
 public static class CodexUsageMapper
 {
     private static readonly string[] ModelContainerKeys = ["models", "modelLimits", "modelRateLimits", "rateLimitsByModel"];
+    private static readonly string[] ReasoningSuffixes =
+    [
+        " extra high reasoning effort",
+        " extra high reasoning",
+        " xhigh reasoning effort",
+        " xhigh reasoning",
+        " high reasoning effort",
+        " high reasoning",
+        " medium reasoning effort",
+        " medium reasoning",
+        " low reasoning effort",
+        " low reasoning",
+        " minimal reasoning effort",
+        " minimal reasoning",
+        " no reasoning",
+        " none reasoning",
+        " extra high",
+        " xhigh",
+        " high",
+        " medium",
+        " low",
+        " minimal",
+        " none",
+        " reasoning effort",
+        " reasoning"
+    ];
 
     public static UsageSnapshot? MapUsage(RpcRateLimitsResponse response, RpcAccountResponse? account, DateTimeOffset now)
     {
@@ -243,7 +269,7 @@ public static class CodexUsageMapper
 
     private static string NormalizeModelKey(string value)
     {
-        var chars = value
+        var chars = StripReasoningSuffix(value)
             .Where(char.IsLetterOrDigit)
             .Select(char.ToLowerInvariant)
             .ToArray();
@@ -258,6 +284,34 @@ public static class CodexUsageMapper
             if (trimmed.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
             {
                 return trimmed[..^suffix.Length].Trim();
+            }
+        }
+
+        return trimmed;
+    }
+
+    private static string StripReasoningSuffix(string rawName)
+    {
+        var trimmed = rawName.Replace('_', ' ').Replace('-', ' ').Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            return trimmed;
+        }
+
+        var changed = true;
+        while (changed)
+        {
+            changed = false;
+            foreach (var suffix in ReasoningSuffixes)
+            {
+                if (!trimmed.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                trimmed = trimmed[..^suffix.Length].Trim();
+                changed = true;
+                break;
             }
         }
 
@@ -479,7 +533,27 @@ public static class CodexUsageMapper
             words.RemoveAt(1);
         }
 
+        NormalizeReasoningDisplayWords(words);
         return string.Join(" ", words.Select(FormatModelWord));
+    }
+
+    private static void NormalizeReasoningDisplayWords(List<string> words)
+    {
+        while (words.Count > 0
+            && (
+                string.Equals(words[^1], "reasoning", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(words[^1], "effort", StringComparison.OrdinalIgnoreCase)))
+        {
+            words.RemoveAt(words.Count - 1);
+        }
+
+        if (words.Count >= 2
+            && string.Equals(words[^2], "extra", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(words[^1], "high", StringComparison.OrdinalIgnoreCase))
+        {
+            words.RemoveAt(words.Count - 1);
+            words[^1] = "xhigh";
+        }
     }
 
     private static string FormatModelWord(string word)
@@ -502,6 +576,11 @@ public static class CodexUsageMapper
         if (string.Equals(word, "spark", StringComparison.OrdinalIgnoreCase))
         {
             return "Spark";
+        }
+
+        if (string.Equals(word, "xhigh", StringComparison.OrdinalIgnoreCase))
+        {
+            return "XHigh";
         }
 
         if (word.All(character => !char.IsLetter(character)))
