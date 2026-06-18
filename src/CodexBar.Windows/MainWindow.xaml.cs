@@ -24,10 +24,12 @@ public sealed partial class MainWindow : Window
     private readonly SettingsStore _settingsStore;
     private readonly WinUiDispatcherQueue _dispatcher;
     private readonly DispatcherTimer _barAnimationTimer = new();
-    private readonly List<ModelWindowView> _modelWindows = [];
+    private readonly List<ModelUsageView> _modelUsages = [];
     private double _barSweepPhase;
-    private double _activeBarValue;
-    private double _targetActiveBarValue;
+    private double _currentBarValue;
+    private double _targetCurrentBarValue;
+    private double _weeklyBarValue;
+    private double _targetWeeklyBarValue;
     private int _activeModelIndex;
     private bool _isModelTransitioning;
     private int _pendingModelIndex = -1;
@@ -84,7 +86,7 @@ public sealed partial class MainWindow : Window
         HudView.Visibility = Visibility.Collapsed;
         SettingsView.Visibility = Visibility.Visible;
         ResizeForCurrentView();
-        _modelWindows.Clear();
+        _modelUsages.Clear();
     }
 
     private void ConfigureCompactWindow()
@@ -124,13 +126,21 @@ public sealed partial class MainWindow : Window
     {
         _barSweepPhase = (_barSweepPhase + 0.035) % 1.0;
         var activeWindowSweep = EaseSweep(_barSweepPhase);
-        _activeBarValue = EaseBarValue(_activeBarValue, _targetActiveBarValue);
+        _currentBarValue = EaseBarValue(_currentBarValue, _targetCurrentBarValue);
+        _weeklyBarValue = EaseBarValue(_weeklyBarValue, _targetWeeklyBarValue);
         ApplyActiveBarProgress(
-            ActiveWindowTrackRoot,
-            ActiveWindowFillBar,
-            ActiveWindowSweepBar,
-            _activeBarValue,
-            _targetActiveBarValue,
+            CurrentWindowTrackRoot,
+            CurrentWindowFillBar,
+            CurrentWindowSweepBar,
+            _currentBarValue,
+            _targetCurrentBarValue,
+            activeWindowSweep);
+        ApplyActiveBarProgress(
+            WeeklyWindowTrackRoot,
+            WeeklyWindowFillBar,
+            WeeklyWindowSweepBar,
+            _weeklyBarValue,
+            _targetWeeklyBarValue,
             activeWindowSweep);
     }
 
@@ -161,7 +171,7 @@ public sealed partial class MainWindow : Window
 
     private void OnModelNavigationKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
     {
-        if (HudView.Visibility != Visibility.Visible || _modelWindows.Count <= 1)
+        if (HudView.Visibility != Visibility.Visible || _modelUsages.Count <= 1)
         {
             return;
         }
@@ -181,7 +191,7 @@ public sealed partial class MainWindow : Window
 
     private void SetActiveModel(int nextIndex, int preferredDirection = 0)
     {
-        if (_modelWindows.Count <= 1)
+        if (_modelUsages.Count <= 1)
         {
             return;
         }
@@ -318,19 +328,19 @@ public sealed partial class MainWindow : Window
             return preferredDirection < 0 ? -1 : 1;
         }
 
-        if (_modelWindows.Count <= 1)
+        if (_modelUsages.Count <= 1)
         {
             return 0;
         }
 
-        var forwardDistance = (targetIndex - currentIndex + _modelWindows.Count) % _modelWindows.Count;
-        var backwardDistance = (currentIndex - targetIndex + _modelWindows.Count) % _modelWindows.Count;
+        var forwardDistance = (targetIndex - currentIndex + _modelUsages.Count) % _modelUsages.Count;
+        var backwardDistance = (currentIndex - targetIndex + _modelUsages.Count) % _modelUsages.Count;
         return forwardDistance <= backwardDistance ? 1 : -1;
     }
 
     private int NormalizeModelIndex(int index)
     {
-        return ((index % _modelWindows.Count) + _modelWindows.Count) % _modelWindows.Count;
+        return ((index % _modelUsages.Count) + _modelUsages.Count) % _modelUsages.Count;
     }
 
     private void CloseCircleButton_Click(object sender, RoutedEventArgs args) => WindowCloseBehavior.Hide(this);
@@ -380,7 +390,7 @@ public sealed partial class MainWindow : Window
 
     private void UpdateState()
     {
-        BuildModelWindows();
+        BuildModelUsages();
 
         var snapshot = _usageStore.Snapshot;
         var credits = _usageStore.Credits;
@@ -398,91 +408,58 @@ public sealed partial class MainWindow : Window
 
     private void ApplyActiveModel()
     {
-        var model = _modelWindows.Count > _activeModelIndex ? _modelWindows[_activeModelIndex] : null;
-        var window = model?.Window;
+        var model = _modelUsages.Count > _activeModelIndex ? _modelUsages[_activeModelIndex] : null;
 
-        ActiveWindowLabelText.Text = model?.DisplayLabel ?? "No model";
-        ActiveWindowPercentText.Text = FormatHudPercent(window);
-        ActiveWindowText.Text = FormatWindow(window);
-        ModelSwitcherMetaText.Text = model?.DisplayLabel ?? string.Empty;
-        ModelPageText.Text = _modelWindows.Count <= 1 ? string.Empty : $"{_activeModelIndex + 1} / {_modelWindows.Count}";
-        _targetActiveBarValue = window?.RemainingPercent ?? 0;
+        ModelSwitcherMetaText.Text = model?.DisplayName ?? string.Empty;
+        ModelPageText.Text = _modelUsages.Count <= 1 ? string.Empty : $"{_activeModelIndex + 1} / {_modelUsages.Count}";
+        ApplyWindowView(CurrentWindowPercentText, CurrentWindowText, model?.Current, out _targetCurrentBarValue);
+        ApplyWindowView(WeeklyWindowPercentText, WeeklyWindowText, model?.Weekly, out _targetWeeklyBarValue);
     }
 
-    private void BuildModelWindows()
+    private void BuildModelUsages()
     {
-        _modelWindows.Clear();
+        _modelUsages.Clear();
         var snapshot = _usageStore.Snapshot;
-        var primary = snapshot?.Primary;
-        var secondary = snapshot?.Secondary;
-        var tertiary = snapshot?.Tertiary;
 
-        var hasSecondary = secondary is not null;
-        AddWindow(ResolveWindowLabel(primary, 0, hasSecondary), primary);
-        AddWindow(ResolveWindowLabel(secondary, 1, hasSecondary), secondary);
-        AddWindow(ResolveWindowLabel(tertiary, 2, hasSecondary), tertiary);
-
-        if (_activeModelIndex >= _modelWindows.Count)
+        if (snapshot?.Models is { Count: > 0 } models)
         {
-            _activeModelIndex = Math.Max(0, _modelWindows.Count - 1);
+            foreach (var model in models.Where(model => model.HasRateLimitWindows))
+            {
+                AddModelUsage(model.ModelName, model.Current, model.Weekly);
+            }
+        }
+        else
+        {
+            AddModelUsage("Codex", snapshot?.Primary, snapshot?.Secondary);
+        }
+
+        if (_activeModelIndex >= _modelUsages.Count)
+        {
+            _activeModelIndex = Math.Max(0, _modelUsages.Count - 1);
         }
     }
 
-    private void AddWindow(string label, RateWindow? window)
+    private void AddModelUsage(string modelName, RateWindow? current, RateWindow? weekly)
     {
-        if (window is null)
+        if (current is null && weekly is null)
         {
             return;
         }
 
-        _modelWindows.Add(new ModelWindowView(label, window));
-    }
-
-    private static string ResolveWindowLabel(RateWindow? window, int index, bool hasSecondaryWindow)
-    {
-        if (window is null)
-        {
-            return index switch
-            {
-                0 => "Current",
-                1 => "Window 2",
-                _ => $"Window {index + 1}",
-            };
-        }
-
-        if (IsWeeklyWindow(window))
-        {
-            return "Weekly";
-        }
-
-        if (hasSecondaryWindow && index == 0)
-        {
-            return "Current";
-        }
-
-        return index switch
-        {
-            0 => "Current",
-            1 => $"Window {index + 1}",
-            _ => $"Window {index + 1}",
-        };
-    }
-
-    private static bool IsWeeklyWindow(RateWindow? window)
-    {
-        if (window?.WindowMinutes is null)
-        {
-            return false;
-        }
-
-        var minutes = window.WindowMinutes.Value;
-        return minutes is >= 7 * 24 * 60 and < 8 * 24 * 60;
+        _modelUsages.Add(new ModelUsageView(modelName, current, weekly));
     }
 
     private void UpdateModelPager()
     {
-        var canNavigate = _modelWindows.Count > 1;
+        var canNavigate = _modelUsages.Count > 1;
         ModelPageText.Visibility = canNavigate ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private static void ApplyWindowView(TextBlock percentText, TextBlock detailText, RateWindow? window, out double targetValue)
+    {
+        percentText.Text = FormatHudPercent(window);
+        detailText.Text = FormatWindow(window);
+        targetValue = window?.RemainingPercent ?? 0;
     }
 
     private string FormatHudMeta(UsageSnapshot? snapshot, bool disabled)
@@ -539,5 +516,5 @@ public sealed partial class MainWindow : Window
         return $"{identity.AccountEmail} ({identity.LoginMethod})";
     }
 
-    private sealed record ModelWindowView(string DisplayLabel, RateWindow Window);
+    private sealed record ModelUsageView(string DisplayName, RateWindow? Current, RateWindow? Weekly);
 }

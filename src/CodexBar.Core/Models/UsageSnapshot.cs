@@ -11,9 +11,19 @@ public sealed record UsageSnapshot(
     RateWindow? Secondary,
     RateWindow? Tertiary,
     DateTimeOffset UpdatedAt,
-    ProviderIdentitySnapshot? Identity)
+    ProviderIdentitySnapshot? Identity,
+    IReadOnlyList<ModelUsageSnapshot>? Models = null)
 {
-    public bool HasRateLimitWindows => Primary is not null || Secondary is not null || Tertiary is not null;
+    public bool HasRateLimitWindows =>
+        Primary is not null
+        || Secondary is not null
+        || Tertiary is not null
+        || (Models?.Any(model => model.HasRateLimitWindows) ?? false);
+}
+
+public sealed record ModelUsageSnapshot(string ModelName, RateWindow? Current, RateWindow? Weekly)
+{
+    public bool HasRateLimitWindows => Current is not null || Weekly is not null;
 }
 
 public sealed record CreditEvent(Guid Id, DateTimeOffset Date, string Service, double CreditsUsed);

@@ -109,6 +109,39 @@ public sealed class MappingTests
         Assert.NotNull(usage.Primary);
         Assert.Equal(9, usage.Primary.UsedPercent);
         Assert.Equal(120, usage.Primary.WindowMinutes);
+        var model = Assert.Single(usage.Models!);
+        Assert.Equal("GPT-5.3 Codex Spark", model.ModelName);
+        Assert.Equal(9, model.Current!.UsedPercent);
+        Assert.Null(model.Weekly);
+    }
+
+    [Fact]
+    public void MapsDefaultAndSparkModelsWithCurrentAndWeeklyWindows()
+    {
+        var response = JsonSerializer.Deserialize<RpcRateLimitsResponse>(JsonSerializer.Serialize(new
+        {
+            rateLimits = new Dictionary<string, object?>
+            {
+                ["primary"] = new { usedPercent = 10.0, windowDurationMins = 300, resetsAt = 1_800_000_000L },
+                ["secondary"] = new { usedPercent = 20.0, windowDurationMins = 10080, resetsAt = 1_800_100_000L },
+                ["gpt-5.3-codex-spark"] = new
+                {
+                    primary = new { usedPercent = 30.0, windowDurationMins = 300, resetsAt = 1_800_200_000L },
+                    secondary = new { usedPercent = 40.0, windowDurationMins = 10080, resetsAt = 1_800_300_000L }
+                },
+                ["planType"] = "plus"
+            }
+        }))!;
+
+        var usage = CodexUsageMapper.MapUsage(response.RateLimits, null, DateTimeOffset.UnixEpoch)!;
+
+        Assert.Equal(2, usage.Models!.Count);
+        Assert.Equal("Codex", usage.Models[0].ModelName);
+        Assert.Equal(10, usage.Models[0].Current!.UsedPercent);
+        Assert.Equal(20, usage.Models[0].Weekly!.UsedPercent);
+        Assert.Equal("GPT-5.3 Codex Spark", usage.Models[1].ModelName);
+        Assert.Equal(30, usage.Models[1].Current!.UsedPercent);
+        Assert.Equal(40, usage.Models[1].Weekly!.UsedPercent);
     }
 
     [Fact]
