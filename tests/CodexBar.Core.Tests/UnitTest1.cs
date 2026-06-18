@@ -317,6 +317,7 @@ public sealed class ConfigTests
 
         Assert.True(File.Exists(path));
         Assert.False(reloaded.GetProviderConfig(UsageProvider.Codex).Enabled);
+        Assert.Equal(CodexBarConfig.DefaultRefreshIntervalSeconds, reloaded.GetProviderConfig(UsageProvider.Codex).RefreshIntervalSeconds);
         Assert.False(reloaded.ClickThroughHud);
     }
 
@@ -340,6 +341,21 @@ public sealed class ConfigTests
 
         Assert.Equal(CodexBarConfig.CurrentVersion, config.Version);
         Assert.True(config.ClickThroughHud);
+        Assert.Equal(CodexBarConfig.DefaultRefreshIntervalSeconds, config.GetProviderConfig(UsageProvider.Codex).RefreshIntervalSeconds);
+    }
+
+    [Fact]
+    public void PreservesSavedRefreshIntervalSeconds()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
+        var store = new CodexBarConfigStore(path);
+        var config = store.LoadOrCreateDefault();
+        config.SetProviderConfig(new ProviderConfig { Id = "codex", RefreshIntervalSeconds = 5 });
+        store.Save(config);
+
+        var reloaded = store.LoadOrCreateDefault();
+
+        Assert.Equal(5, reloaded.GetProviderConfig(UsageProvider.Codex).RefreshIntervalSeconds);
     }
 }
 

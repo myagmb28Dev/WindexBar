@@ -6,7 +6,9 @@ namespace CodexBar.Core.Config;
 public sealed class CodexBarConfig
 {
     public const int CurrentVersion = 2;
+    public const int MinRefreshIntervalSeconds = 1;
     public const int DefaultRefreshIntervalSeconds = 30;
+    public const int MaxRefreshIntervalSeconds = 3600;
 
     [JsonPropertyName("version")]
     public int Version { get; set; } = CurrentVersion;
@@ -75,12 +77,19 @@ public sealed class ProviderConfig
     [JsonPropertyName("source")]
     public string Source { get; set; } = "cli";
 
+    [JsonPropertyName("refreshIntervalSeconds")]
+    public int RefreshIntervalSeconds { get; set; } = CodexBarConfig.DefaultRefreshIntervalSeconds;
+
     public static ProviderConfig DefaultCodex() => new();
 
     public ProviderConfig Normalized()
     {
         Id = string.IsNullOrWhiteSpace(Id) ? "codex" : Id.Trim().ToLowerInvariant();
         Source = string.IsNullOrWhiteSpace(Source) ? "cli" : Source.Trim().ToLowerInvariant();
+        RefreshIntervalSeconds = Math.Clamp(
+            RefreshIntervalSeconds <= 0 ? CodexBarConfig.DefaultRefreshIntervalSeconds : RefreshIntervalSeconds,
+            CodexBarConfig.MinRefreshIntervalSeconds,
+            CodexBarConfig.MaxRefreshIntervalSeconds);
         return this;
     }
 }

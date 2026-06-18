@@ -6,8 +6,6 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
-using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Animation;
 using Windows.Graphics;
 using Windows.System;
 using WinUiDispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue;
@@ -17,9 +15,9 @@ namespace CodexBar.Windows;
 public sealed partial class MainWindow : Window
 {
     private const double HudClientWidth = 265;
-    private const double HudClientHeight = 250;
+    private const double HudClientHeight = 240;
     private const double SettingsClientWidth = HudClientWidth;
-    private const double SettingsClientHeight = 174;
+    private const double SettingsClientHeight = 204;
     private const double KeyboardScrollStep = 36;
 
     private readonly UsageStore _usageStore;
@@ -32,10 +30,6 @@ public sealed partial class MainWindow : Window
     private double _targetCurrentBarValue;
     private double _weeklyBarValue;
     private double _targetWeeklyBarValue;
-    private int _activeModelIndex;
-    private bool _isModelTransitioning;
-    private int _pendingModelIndex = -1;
-    private int _pendingModelDirection;
 
     public MainWindow(UsageStore usageStore, SettingsStore settingsStore)
     {
@@ -85,6 +79,7 @@ public sealed partial class MainWindow : Window
     {
         Title = "Win CodexBar Settings";
         CodexEnabledCheckBox.IsChecked = _settingsStore.Codex.Enabled;
+        RefreshIntervalSecondsNumberBox.Value = _settingsStore.Codex.RefreshIntervalSeconds;
         HudView.Visibility = Visibility.Collapsed;
         SettingsView.Visibility = Visibility.Visible;
         ResizeForCurrentView();
@@ -180,14 +175,6 @@ public sealed partial class MainWindow : Window
 
         switch (e.Key)
         {
-            case VirtualKey.Left when _modelUsages.Count > 1:
-                SetActiveModel(_activeModelIndex - 1, -1);
-                e.Handled = true;
-                break;
-            case VirtualKey.Right when _modelUsages.Count > 1:
-                SetActiveModel(_activeModelIndex + 1, 1);
-                e.Handled = true;
-                break;
             case VirtualKey.Down:
                 ScrollHudBy(KeyboardScrollStep);
                 e.Handled = true;
@@ -221,160 +208,6 @@ public sealed partial class MainWindow : Window
     {
         var targetOffset = Math.Clamp(verticalOffset, 0, Math.Max(0, HudScrollViewer.ScrollableHeight));
         HudScrollViewer.ChangeView(null, targetOffset, null, disableAnimation: false);
-    }
-
-    private void SetActiveModel(int nextIndex, int preferredDirection = 0)
-    {
-        if (_modelUsages.Count <= 1)
-        {
-            return;
-        }
-
-        var normalized = NormalizeModelIndex(nextIndex);
-        var current = _activeModelIndex;
-        if (normalized == current)
-        {
-            return;
-        }
-
-        var direction = ResolveTransitionDirection(current, normalized, preferredDirection);
-
-        if (_isModelTransitioning)
-        {
-            _pendingModelIndex = normalized;
-            _pendingModelDirection = direction;
-            return;
-        }
-
-        _activeModelIndex = normalized;
-        AnimateModelTransition(direction);
-    }
-
-    private void ProcessPendingModelTransition()
-    {
-        if (_pendingModelIndex < 0)
-        {
-            return;
-        }
-
-        var target = _pendingModelIndex;
-        var direction = _pendingModelDirection;
-        _pendingModelIndex = -1;
-        _pendingModelDirection = 0;
-
-        if (target == _activeModelIndex)
-        {
-            return;
-        }
-
-        var resolvedDirection = direction != 0 ? direction : ResolveTransitionDirection(_activeModelIndex, target, 0);
-        _activeModelIndex = target;
-        AnimateModelTransition(resolvedDirection);
-    }
-
-    private void AnimateModelTransition(int direction)
-    {
-        var panel = ModelContentPanel;
-        if (panel is null || panel.ActualWidth <= 0 || ModelContentTransform is null)
-        {
-            ApplyActiveModel();
-            return;
-        }
-
-        var offset = Math.Max(24, panel.ActualWidth * 0.3);
-        var outOffset = direction >= 0 ? -offset : offset;
-
-        _isModelTransitioning = true;
-        panel.IsHitTestVisible = false;
-
-        var outSlide = new DoubleAnimation
-        {
-            From = 0,
-            To = outOffset,
-            Duration = TimeSpan.FromMilliseconds(140),
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
-        };
-        var outFade = new DoubleAnimation
-        {
-            From = 1,
-            To = 0.24,
-            Duration = TimeSpan.FromMilliseconds(130),
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-        };
-
-        var outStory = new Storyboard();
-        Storyboard.SetTarget(outSlide, ModelContentTransform);
-        Storyboard.SetTargetProperty(outSlide, nameof(TranslateTransform.X));
-        Storyboard.SetTarget(outFade, panel);
-        Storyboard.SetTargetProperty(outFade, "Opacity");
-        outStory.Children.Add(outSlide);
-        outStory.Children.Add(outFade);
-
-        outStory.Completed += (_, _) =>
-        {
-            ApplyActiveModel();
-            var inOffset = -outOffset;
-            ModelContentTransform.X = inOffset;
-            panel.Opacity = 0;
-
-            var inSlide = new DoubleAnimation
-            {
-                From = inOffset,
-                To = 0,
-                Duration = TimeSpan.FromMilliseconds(150),
-                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-            };
-            var inFade = new DoubleAnimation
-            {
-                From = 0,
-                To = 1,
-                Duration = TimeSpan.FromMilliseconds(150),
-                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
-            };
-
-            var inStory = new Storyboard();
-            Storyboard.SetTarget(inSlide, ModelContentTransform);
-            Storyboard.SetTargetProperty(inSlide, nameof(TranslateTransform.X));
-            Storyboard.SetTarget(inFade, panel);
-            Storyboard.SetTargetProperty(inFade, "Opacity");
-            inStory.Children.Add(inSlide);
-            inStory.Children.Add(inFade);
-
-            inStory.Completed += (_, _) =>
-            {
-                ModelContentTransform.X = 0;
-                panel.Opacity = 1;
-                panel.IsHitTestVisible = true;
-                _isModelTransitioning = false;
-                ProcessPendingModelTransition();
-            };
-
-            inStory.Begin();
-        };
-
-        outStory.Begin();
-    }
-
-    private int ResolveTransitionDirection(int currentIndex, int targetIndex, int preferredDirection)
-    {
-        if (preferredDirection != 0)
-        {
-            return preferredDirection < 0 ? -1 : 1;
-        }
-
-        if (_modelUsages.Count <= 1)
-        {
-            return 0;
-        }
-
-        var forwardDistance = (targetIndex - currentIndex + _modelUsages.Count) % _modelUsages.Count;
-        var backwardDistance = (currentIndex - targetIndex + _modelUsages.Count) % _modelUsages.Count;
-        return forwardDistance <= backwardDistance ? 1 : -1;
-    }
-
-    private int NormalizeModelIndex(int index)
-    {
-        return ((index % _modelUsages.Count) + _modelUsages.Count) % _modelUsages.Count;
     }
 
     private void CloseCircleButton_Click(object sender, RoutedEventArgs args) => WindowCloseBehavior.Hide(this);
@@ -415,9 +248,24 @@ public sealed partial class MainWindow : Window
         _settingsStore.UpdateCodex(c =>
         {
             c.Enabled = CodexEnabledCheckBox.IsChecked == true;
+            c.RefreshIntervalSeconds = ReadRefreshIntervalSeconds();
         });
         _usageStore.StartBackgroundRefresh();
         ShowHudView();
+    }
+
+    private int ReadRefreshIntervalSeconds()
+    {
+        var value = RefreshIntervalSecondsNumberBox.Value;
+        if (double.IsNaN(value))
+        {
+            return CodexBarConfig.DefaultRefreshIntervalSeconds;
+        }
+
+        return (int)Math.Clamp(
+            Math.Round(value),
+            CodexBarConfig.MinRefreshIntervalSeconds,
+            CodexBarConfig.MaxRefreshIntervalSeconds);
     }
 
     private void QuitButton_Click(object sender, RoutedEventArgs args) => App.Current.Shutdown();
@@ -443,57 +291,34 @@ public sealed partial class MainWindow : Window
 
     private void ApplyActiveModel()
     {
-        var model = _modelUsages.Count > _activeModelIndex ? _modelUsages[_activeModelIndex] : null;
-        var modelDisplayName = model is null ? string.Empty : FormatModelDisplayName(model);
+        var model = _modelUsages.FirstOrDefault();
+        var modelDisplayName = model?.DisplayName ?? string.Empty;
 
         HudHeaderText.Text = FirstNonBlank(modelDisplayName, "Codex");
-        ModelPageText.Text = _modelUsages.Count <= 1 ? string.Empty : $"{_activeModelIndex + 1} / {_modelUsages.Count}";
+        ModelPageText.Text = string.Empty;
         ApplyWindowView(CurrentWindowPercentText, CurrentWindowText, model?.Current, out _targetCurrentBarValue);
         ApplyWindowView(WeeklyWindowPercentText, WeeklyWindowText, model?.Weekly, out _targetWeeklyBarValue);
-    }
-
-    private string FormatModelDisplayName(ModelUsageView model)
-    {
-        var activeModel = _usageStore.Snapshot?.ActiveModel;
-        if (activeModel is null || string.IsNullOrWhiteSpace(activeModel.DisplayName))
-        {
-            return model.DisplayName;
-        }
-
-        if (IsSameModelName(model.DisplayName, activeModel.Model))
-        {
-            return activeModel.DisplayName;
-        }
-
-        if (IsGenericCodexModel(model.DisplayName) && !HasExplicitActiveModelPage(activeModel.Model))
-        {
-            return activeModel.DisplayName;
-        }
-
-        return model.DisplayName;
     }
 
     private void BuildModelUsages()
     {
         _modelUsages.Clear();
         var snapshot = _usageStore.Snapshot;
-
-        if (snapshot?.Models is { Count: > 0 } models)
+        if (snapshot is null)
         {
-            foreach (var model in models.Where(model => model.HasRateLimitWindows))
-            {
-                AddModelUsage(model.ModelName, model.Current, model.Weekly);
-            }
-        }
-        else
-        {
-            AddModelUsage(FirstNonBlank(snapshot?.ActiveModel?.DisplayName, "Codex"), snapshot?.Primary, snapshot?.Secondary);
+            return;
         }
 
-        if (_activeModelIndex >= _modelUsages.Count)
+        var activeModel = snapshot.ActiveModel;
+        var displayName = FirstNonBlank(activeModel?.DisplayName, activeModel?.Model, "Codex");
+        var currentSessionModel = FindCurrentSessionModel(snapshot.Models, activeModel);
+        if (currentSessionModel is not null)
         {
-            _activeModelIndex = Math.Max(0, _modelUsages.Count - 1);
+            AddModelUsage(displayName, currentSessionModel.Current, currentSessionModel.Weekly);
+            return;
         }
+
+        AddModelUsage(displayName, snapshot.Primary, snapshot.Secondary);
     }
 
     private void AddModelUsage(string modelName, RateWindow? current, RateWindow? weekly)
@@ -508,8 +333,7 @@ public sealed partial class MainWindow : Window
 
     private void UpdateModelPager()
     {
-        var canNavigate = _modelUsages.Count > 1;
-        ModelPageText.Visibility = canNavigate ? Visibility.Visible : Visibility.Collapsed;
+        ModelPageText.Visibility = Visibility.Collapsed;
     }
 
     private static void ApplyWindowView(TextBlock percentText, TextBlock detailText, RateWindow? window, out double targetValue)
@@ -535,8 +359,41 @@ public sealed partial class MainWindow : Window
     private static bool IsSameModelName(string lhs, string rhs) =>
         string.Equals(NormalizeModelKey(lhs), NormalizeModelKey(rhs), StringComparison.OrdinalIgnoreCase);
 
-    private bool HasExplicitActiveModelPage(string modelName) =>
-        _modelUsages.Any(model => !IsGenericCodexModel(model.DisplayName) && IsSameModelName(model.DisplayName, modelName));
+    private static ModelUsageSnapshot? FindCurrentSessionModel(
+        IReadOnlyList<ModelUsageSnapshot>? models,
+        CodexModelSelection? activeModel)
+    {
+        if (models is null || models.Count == 0)
+        {
+            return null;
+        }
+
+        var modelsWithLimits = models.Where(model => model.HasRateLimitWindows).ToArray();
+        if (modelsWithLimits.Length == 0)
+        {
+            return null;
+        }
+
+        if (activeModel is not null)
+        {
+            var matchingModel = modelsWithLimits.FirstOrDefault(model =>
+                IsSameModelName(model.ModelName, activeModel.Model)
+                || IsSameModelName(model.ModelName, activeModel.DisplayName));
+            if (matchingModel is not null)
+            {
+                return matchingModel;
+            }
+
+            var genericModel = modelsWithLimits.FirstOrDefault(model => IsGenericCodexModel(model.ModelName));
+            if (genericModel is not null)
+            {
+                return genericModel;
+            }
+        }
+
+        return modelsWithLimits.FirstOrDefault(model => IsGenericCodexModel(model.ModelName))
+            ?? modelsWithLimits.FirstOrDefault();
+    }
 
     private static bool IsGenericCodexModel(string modelName) =>
         string.Equals(modelName.Trim(), "Codex", StringComparison.OrdinalIgnoreCase);

@@ -210,12 +210,31 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <TextBlock Grid.Row="0" Text="Settings" FontSize="20" FontWeight="SemiBold" />
                 <CheckBox x:Name="CodexEnabledCheckBox" Grid.Row="1" Content="Enable Codex" />
 
-                <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="6">
+                <Grid Grid.Row="2" ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="98" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Refresh interval" VerticalAlignment="Center" />
+                    <NumberBox
+                        x:Name="RefreshIntervalSecondsNumberBox"
+                        Grid.Column="1"
+                        Minimum="1"
+                        Maximum="3600"
+                        SmallChange="1"
+                        LargeChange="10"
+                        SpinButtonPlacementMode="Inline" />
+                    <TextBlock Grid.Column="2" Text="s" VerticalAlignment="Center" />
+                </Grid>
+
+                <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="6">
                     <Button Content="Cancel" Click="CancelSettingsButton_Click" />
                     <Button Content="Save" Click="SaveSettingsButton_Click" />
                 </StackPanel>

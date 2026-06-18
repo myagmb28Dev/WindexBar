@@ -82,7 +82,7 @@ public sealed class UsageStore : IDisposable
     {
         StopBackgroundRefresh();
         _loopCts = new CancellationTokenSource();
-        _timer = new PeriodicTimer(TimeSpan.FromSeconds(CodexBarConfig.DefaultRefreshIntervalSeconds));
+        _timer = new PeriodicTimer(TimeSpan.FromSeconds(_settings.Codex.RefreshIntervalSeconds));
         _ = Task.Run(async () =>
         {
             await RefreshAsync(_loopCts.Token).ConfigureAwait(false);
