@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/WindexBar.Cli/WindexBar.Cli.csproj" />
+    <Project Path="src/WindexBar.Core/WindexBar.Core.csproj" />
+    <Project Path="src/WindexBar.Windows/WindexBar.Windows.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/WindexBar.Core.Tests/WindexBar.Core.Tests.csproj" />
+  </Folder>
+</Solution>

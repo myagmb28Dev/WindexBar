@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "WindexBar.Windows (Unpackaged)": {
+      "commandName": "Project"
+    },
+    "WindexBar.Windows (Package)": {
+      "commandName": "MsixPackage"
+    }
+  }
+}

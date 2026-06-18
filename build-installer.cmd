@@ -3,9 +3,11 @@ setlocal
 
 set "ROOT=%~dp0"
 set "PUBLISH_DIR=%ROOT%artifacts\publish\win-x64"
-set "ISS_FILE=%ROOT%installer\WinCodexBar.iss"
+set "ISS_FILE=%ROOT%installer\WindexBar.iss"
+set "SETUP_ICON=%ROOT%src\WindexBar.Windows\Assets\TrayIcon.ico"
 for /f "usebackq delims=" %%T in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Date -Format 'yyyyMMdd-HHmmss'"`) do set "BUILD_STAMP=%%T"
 set "INSTALLER_DIR=%ROOT%artifacts\installer\%BUILD_STAMP%"
+set "INNO_OUTPUT_DIR=%TEMP%\WindexBarInstaller\%BUILD_STAMP%"
 set "ISCC="
 
 if exist "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
@@ -24,15 +26,26 @@ if not defined ISCC (
     exit /b 1
 )
 
+if exist "%PUBLISH_DIR%" rmdir /S /Q "%PUBLISH_DIR%"
 if not exist "%PUBLISH_DIR%" mkdir "%PUBLISH_DIR%"
 if not exist "%INSTALLER_DIR%" mkdir "%INSTALLER_DIR%"
+if not exist "%INNO_OUTPUT_DIR%" mkdir "%INNO_OUTPUT_DIR%"
 
-"%ROOT%.dotnet\dotnet.exe" publish "%ROOT%src\CodexBar.Windows\CodexBar.Windows.csproj" -c Release -r win-x64 --self-contained true -p:WindowsPackageType=None -p:WindowsAppSDKSelfContained=true -p:PublishTrimmed=false -o "%PUBLISH_DIR%"
+"%ROOT%.dotnet\dotnet.exe" publish "%ROOT%src\WindexBar.Windows\WindexBar.Windows.csproj" -c Release -r win-x64 --self-contained true -p:WindowsPackageType=None -p:WindowsAppSDKSelfContained=true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:PublishReadyToRun=false -p:PublishTrimmed=false -p:NuGetAudit=false -o "%PUBLISH_DIR%"
 if errorlevel 1 exit /b %errorlevel%
 
-"%ISCC%" "%ISS_FILE%" "/DSourceDir=%PUBLISH_DIR%" "/DOutputDir=%INSTALLER_DIR%"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%scripts\sign-app.ps1" -Path "%PUBLISH_DIR%\WindexBar.Windows.exe" -WarnOnly
+if errorlevel 1 exit /b %errorlevel%
+
+"%ISCC%" "%ISS_FILE%" "/DSourceDir=%PUBLISH_DIR%" "/DOutputDir=%INNO_OUTPUT_DIR%" "/DSetupIconFile=%SETUP_ICON%"
+if errorlevel 1 exit /b %errorlevel%
+
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%scripts\sign-app.ps1" -Path "%INNO_OUTPUT_DIR%\WindexBarSetup.exe" -WarnOnly
+if errorlevel 1 exit /b %errorlevel%
+
+copy /Y "%INNO_OUTPUT_DIR%\WindexBarSetup.exe" "%INSTALLER_DIR%\WindexBarSetup.exe" >nul
 if errorlevel 1 exit /b %errorlevel%
 
 echo.
 echo Installer created:
-echo   %INSTALLER_DIR%\WinCodexBarSetup.exe
+echo   %INSTALLER_DIR%\WindexBarSetup.exe

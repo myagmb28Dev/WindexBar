@@ -131,7 +131,7 @@ function Format-Window {
 try {
     Send-RpcRequest -Id 1 -Method "initialize" -Params @{
         clientInfo = @{
-            name = "wincodexbar-dump"
+            name = "windexbar-dump"
             version = "0.1.0"
         }
     }
