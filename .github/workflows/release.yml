@@ -1,0 +1,201 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version without the leading v, for example 1.0.1.
+        required: true
+        type: string
+      submit_winget:
+        description: Submit a winget update PR after publishing the release.
+        required: true
+        default: true
+        type: boolean
+      release_notes:
+        description: Optional release notes.
+        required: false
+        type: string
+  push:
+    tags:
+      - v*
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  WINGET_PACKAGE_ID: myagmb28Dev.WindexBar
+  WINGET_CREATE_GITHUB_TOKEN: ${{ secrets.WINGET_CREATE_GITHUB_TOKEN }}
+  WINDOWS_CODESIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
+  WINDOWS_CODESIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PFX_PASSWORD }}
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Resolve release inputs
+        id: release
+        shell: pwsh
+        run: |
+          $version = '${{ inputs.version }}'
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            if ($env:GITHUB_REF_TYPE -ne 'tag') {
+              throw 'A version input is required unless the workflow is running from a v* tag.'
+            }
+
+            $version = $env:GITHUB_REF_NAME
+          }
+
+          $version = $version.Trim()
+          if ($version.StartsWith('v', [StringComparison]::OrdinalIgnoreCase)) {
+            $version = $version.Substring(1)
+          }
+
+          if ($version -notmatch '^\d+\.\d+\.\d+([-.+][0-9A-Za-z.-]+)?$') {
+            throw "Version must look like 1.2.3. Received: $version"
+          }
+
+          $tag = "v$version"
+          $submitWinget = '${{ github.event_name == 'push' || inputs.submit_winget }}'
+
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "submit_winget=$submitWinget" >> $env:GITHUB_OUTPUT
+          "installer_url=https://github.com/${{ github.repository }}/releases/download/$tag/WindexBarSetup.exe" >> $env:GITHUB_OUTPUT
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Set up .NET 6 runtime for WingetCreate
+        if: steps.release.outputs.submit_winget == 'true'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 6.0.x
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Import code signing certificate
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_PFX_BASE64)) {
+            Write-Warning 'WINDOWS_CODESIGN_PFX_BASE64 is not set. Installer will be built without a CI-provided signing certificate.'
+            return
+          }
+
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'windexbar-codesign.pfx'
+          $bytes = [Convert]::FromBase64String($env:WINDOWS_CODESIGN_PFX_BASE64)
+          [IO.File]::WriteAllBytes($pfxPath, $bytes)
+
+          if ([string]::IsNullOrEmpty($env:WINDOWS_CODESIGN_PFX_PASSWORD)) {
+            $password = New-Object System.Security.SecureString
+          } else {
+            $password = ConvertTo-SecureString $env:WINDOWS_CODESIGN_PFX_PASSWORD -AsPlainText -Force
+          }
+
+          Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\CurrentUser\My -Password $password | Out-Null
+          Remove-Item -LiteralPath $pfxPath -Force
+
+      - name: Restore
+        shell: pwsh
+        run: dotnet restore .\WindexBar.slnx -p:NuGetAudit=false
+
+      - name: Test
+        shell: pwsh
+        run: >
+          dotnet test .\tests\WindexBar.Core.Tests\WindexBar.Core.Tests.csproj
+          --no-restore
+          --nologo
+          --verbosity minimal
+          --disable-build-servers
+          -m:1
+          -p:BuildInParallel=false
+          -p:UseSharedCompilation=false
+          -p:NuGetAudit=false
+
+      - name: Build installer
+        shell: cmd
+        run: build-installer.cmd ${{ steps.release.outputs.version }}
+
+      - name: Collect installer metadata
+        id: installer
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -Path .\artifacts\installer -Filter WindexBarSetup.exe -Recurse |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+
+          if (-not $installer) {
+            throw 'WindexBarSetup.exe was not produced.'
+          }
+
+          $hash = (Get-FileHash -Path $installer.FullName -Algorithm SHA256).Hash
+          $signature = Get-AuthenticodeSignature -FilePath $installer.FullName
+
+          "path=$($installer.FullName)" >> $env:GITHUB_OUTPUT
+          "sha256=$hash" >> $env:GITHUB_OUTPUT
+          "signature_status=$($signature.Status)" >> $env:GITHUB_OUTPUT
+
+          Write-Host "Installer: $($installer.FullName)"
+          Write-Host "SHA256: $hash"
+          Write-Host "Signature: $($signature.Status)"
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WindexBarSetup-${{ steps.release.outputs.version }}
+          path: ${{ steps.installer.outputs.path }}
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = '${{ steps.release.outputs.tag }}'
+          $version = '${{ steps.release.outputs.version }}'
+          $installer = '${{ steps.installer.outputs.path }}'
+          $notes = @'
+          ${{ inputs.release_notes }}
+          '@
+
+          if ([string]::IsNullOrWhiteSpace($notes)) {
+            $notes = "WindexBar $version installer release."
+          }
+
+          if (gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null) {
+            gh release upload $tag "$installer#WindexBarSetup.exe" --repo $env:GITHUB_REPOSITORY --clobber
+            gh release edit $tag --repo $env:GITHUB_REPOSITORY --title "WindexBar $version" --notes $notes
+          } else {
+            gh release create $tag "$installer#WindexBarSetup.exe" --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "WindexBar $version" --notes $notes
+          }
+
+      - name: Submit winget update
+        if: steps.release.outputs.submit_winget == 'true'
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINGET_CREATE_GITHUB_TOKEN)) {
+            throw 'WINGET_CREATE_GITHUB_TOKEN secret is required to submit winget updates.'
+          }
+
+          $wingetCreate = Join-Path $env:RUNNER_TEMP 'wingetcreate.exe'
+          Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile $wingetCreate
+
+          & $wingetCreate update $env:WINGET_PACKAGE_ID `
+            -u '${{ steps.release.outputs.installer_url }}' `
+            -v '${{ steps.release.outputs.version }}' `
+            -t $env:WINGET_CREATE_GITHUB_TOKEN `
+            --submit

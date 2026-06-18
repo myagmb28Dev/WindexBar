@@ -24,3 +24,15 @@ Codex 사용량 한도를 Windows 트레이에서 빠르게 확인하는 작은 
 ```powershell
 .\run.cmd
 ```
+
+## Release automation
+
+Run the GitHub Actions `Release` workflow to test, build the installer, publish a GitHub Release, and optionally submit a winget update PR.
+
+Required repository secrets:
+
+- `WINGET_CREATE_GITHUB_TOKEN`: GitHub PAT for `wingetcreate` to submit winget PRs.
+- `WINDOWS_CODESIGN_PFX_BASE64`: Optional Base64-encoded PFX code signing certificate.
+- `WINDOWS_CODESIGN_PFX_PASSWORD`: Optional PFX password.
+
+After the first winget registration PR is merged, run the `Release` workflow with the next version number for each update.

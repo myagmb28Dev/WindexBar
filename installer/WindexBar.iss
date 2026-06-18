@@ -1,6 +1,8 @@
 #define AppName "WindexBar"
 #define AppExeName "WindexBar.Windows.exe"
+#ifndef AppVersion
 #define AppVersion "1.0.0"
+#endif
 #ifndef SourceDir
 #define SourceDir "..\artifacts\publish\win-x64"
 #endif
