@@ -7,11 +7,6 @@ on:
         description: Release version without the leading v, for example 1.0.1.
         required: true
         type: string
-      submit_winget:
-        description: Submit a winget update PR after publishing the release.
-        required: true
-        default: true
-        type: boolean
       release_notes:
         description: Optional release notes.
         required: false
@@ -30,8 +25,6 @@ concurrency:
 env:
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
-  WINGET_PACKAGE_ID: myagmb28Dev.WindexBar
-  WINGET_CREATE_GITHUB_TOKEN: ${{ secrets.WINGET_CREATE_GITHUB_TOKEN }}
   WINDOWS_CODESIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
   WINDOWS_CODESIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PFX_PASSWORD }}
 
@@ -66,23 +59,14 @@ jobs:
           }
 
           $tag = "v$version"
-          $submitWinget = '${{ github.event_name == 'push' || inputs.submit_winget }}'
 
           "version=$version" >> $env:GITHUB_OUTPUT
           "tag=$tag" >> $env:GITHUB_OUTPUT
-          "submit_winget=$submitWinget" >> $env:GITHUB_OUTPUT
-          "installer_url=https://github.com/${{ github.repository }}/releases/download/$tag/WindexBarSetup.exe" >> $env:GITHUB_OUTPUT
 
       - name: Set up .NET SDK
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
-
-      - name: Set up .NET 6 runtime for WingetCreate
-        if: steps.release.outputs.submit_winget == 'true'
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 6.0.x
 
       - name: Install Inno Setup
         shell: pwsh
@@ -182,20 +166,3 @@ jobs:
           } else {
             gh release create $tag "$installer#WindexBarSetup.exe" --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "WindexBar $version" --notes $notes
           }
-
-      - name: Submit winget update
-        if: steps.release.outputs.submit_winget == 'true'
-        shell: pwsh
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:WINGET_CREATE_GITHUB_TOKEN)) {
-            throw 'WINGET_CREATE_GITHUB_TOKEN secret is required to submit winget updates.'
-          }
-
-          $wingetCreate = Join-Path $env:RUNNER_TEMP 'wingetcreate.exe'
-          Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile $wingetCreate
-
-          & $wingetCreate update $env:WINGET_PACKAGE_ID `
-            -u '${{ steps.release.outputs.installer_url }}' `
-            -v '${{ steps.release.outputs.version }}' `
-            -t $env:WINGET_CREATE_GITHUB_TOKEN `
-            --submit
