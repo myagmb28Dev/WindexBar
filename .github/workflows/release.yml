@@ -131,26 +131,17 @@ jobs:
           $tag = '${{ steps.release.outputs.tag }}'
           $version = '${{ steps.release.outputs.version }}'
           $installer = '${{ steps.installer.outputs.path }}'
-          $sha256 = '${{ steps.installer.outputs.sha256 }}'
-          $notesPath = Join-Path $env:RUNNER_TEMP 'release-notes.md'
-          $verificationNotes = "## Verification`n`nSHA256: $sha256"
 
-          $releaseJson = gh release view $tag --repo $env:GITHUB_REPOSITORY --json body 2>$null
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           $releaseExists = $LASTEXITCODE -eq 0
 
           if ($releaseExists) {
-            $release = $releaseJson | ConvertFrom-Json
-            $body = [regex]::Replace($release.body, '(?ms)\r?\n## Verification\r?\n.*\z', '')
-            Set-Content -LiteralPath $notesPath -Value $body -Encoding UTF8
-            Add-Content -LiteralPath $notesPath -Value ''
-            Add-Content -LiteralPath $notesPath -Value $verificationNotes
-
-            gh release upload $tag "$installer#WindexBarSetup.exe" --repo $env:GITHUB_REPOSITORY --clobber
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-            gh release edit $tag --repo $env:GITHUB_REPOSITORY --title "WindexBar $version" --notes-file $notesPath
+            gh release edit $tag --repo $env:GITHUB_REPOSITORY --title "WindexBar $version" --draft=false
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           } else {
-            gh release create $tag "$installer#WindexBarSetup.exe" --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "WindexBar $version" --generate-notes --notes $verificationNotes
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --verify-tag --title "WindexBar $version" --generate-notes
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
+
+          gh release upload $tag "$installer#WindexBarSetup.exe" --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
