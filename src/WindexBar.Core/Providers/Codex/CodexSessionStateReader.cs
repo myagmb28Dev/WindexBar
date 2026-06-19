@@ -60,6 +60,7 @@ public static class CodexSessionStateReader
 
         CodexSessionStateSnapshot? latestStateWithActiveModel = null;
         CodexSessionStateSnapshot? latestStateWithLimits = null;
+        CodexSessionStateSnapshot? latestStateWithTokenUsage = null;
 
         foreach (var file in Directory.EnumerateFiles(sessionsRoot, "rollout-*.jsonl", options)
                      .Select(path => new FileInfo(path))
@@ -87,15 +88,21 @@ public static class CodexSessionStateReader
             {
                 latestStateWithLimits = state;
             }
+
+            if (state.TokenUsage is not null && latestStateWithTokenUsage is null)
+            {
+                latestStateWithTokenUsage = state;
+            }
         }
 
-        return latestStateWithActiveModel ?? latestStateWithLimits;
+        return latestStateWithActiveModel ?? latestStateWithLimits ?? latestStateWithTokenUsage;
     }
 
     private static CodexSessionStateSnapshot? ReadSessionFile(string path, out bool isSubagent)
     {
         isSubagent = false;
         CodexModelSelection? latestSelection = null;
+        TokenUsageSnapshot? latestTokenUsage = null;
         var modelLimits = new List<ModelUsageSnapshot>();
 
         try
@@ -108,7 +115,10 @@ public static class CodexSessionStateReader
                         && !line.Contains("thread_settings", StringComparison.Ordinal)
                         && !line.Contains("threadSettings", StringComparison.Ordinal)
                         && !line.Contains("rate_limits", StringComparison.Ordinal)
-                        && !line.Contains("rateLimits", StringComparison.Ordinal)))
+                        && !line.Contains("rateLimits", StringComparison.Ordinal)
+                        && !line.Contains("token_count", StringComparison.Ordinal)
+                        && !line.Contains("token_usage", StringComparison.Ordinal)
+                        && !line.Contains("tokenUsage", StringComparison.Ordinal)))
                 {
                     continue;
                 }
@@ -152,6 +162,11 @@ public static class CodexSessionStateReader
                     {
                         AddOrReplaceModel(modelLimits, rateLimitModel);
                     }
+
+                    if (TryReadTokenUsage(root, payload, out var tokenUsage))
+                    {
+                        latestTokenUsage = tokenUsage;
+                    }
                 }
                 catch (JsonException)
                 {
@@ -160,20 +175,20 @@ public static class CodexSessionStateReader
         }
         catch (IOException)
         {
-            return latestSelection is null && modelLimits.Count == 0
+            return latestSelection is null && modelLimits.Count == 0 && latestTokenUsage is null
                 ? null
-                : new CodexSessionStateSnapshot(latestSelection, modelLimits);
+                : new CodexSessionStateSnapshot(latestSelection, modelLimits, latestTokenUsage);
         }
         catch (UnauthorizedAccessException)
         {
-            return latestSelection is null && modelLimits.Count == 0
+            return latestSelection is null && modelLimits.Count == 0 && latestTokenUsage is null
                 ? null
-                : new CodexSessionStateSnapshot(latestSelection, modelLimits);
+                : new CodexSessionStateSnapshot(latestSelection, modelLimits, latestTokenUsage);
         }
 
-        return latestSelection is null && modelLimits.Count == 0
+        return latestSelection is null && modelLimits.Count == 0 && latestTokenUsage is null
             ? null
-            : new CodexSessionStateSnapshot(latestSelection, modelLimits);
+            : new CodexSessionStateSnapshot(latestSelection, modelLimits, latestTokenUsage);
     }
 
     private static bool ContainsToken(string value, string token) =>
@@ -304,6 +319,64 @@ public static class CodexSessionStateReader
             || TryGetStringAny(limits, out limitName, "limit_id", "limitId")
             ? CodexUsageMapper.FormatModelName(limitName!)
             : "Codex";
+    }
+
+    private static bool TryReadTokenUsage(JsonElement root, JsonElement payload, out TokenUsageSnapshot tokenUsage)
+    {
+        tokenUsage = null!;
+        if (!TryGetObject(payload, "info", out var info))
+        {
+            return false;
+        }
+
+        _ = TryReadTokenUsageBreakdown(info, out var total, "total_token_usage", "totalTokenUsage");
+        _ = TryReadTokenUsageBreakdown(info, out var last, "last_token_usage", "lastTokenUsage");
+        if (total is null && last is null)
+        {
+            return false;
+        }
+
+        int? modelContextWindow = null;
+        if (TryGetIntAny(info, out var parsedWindow, "model_context_window", "modelContextWindow"))
+        {
+            modelContextWindow = parsedWindow;
+        }
+
+        tokenUsage = new TokenUsageSnapshot(total, last, modelContextWindow, TryGetTimestamp(root));
+        return tokenUsage.HasUsage;
+    }
+
+    private static bool TryReadTokenUsageBreakdown(JsonElement info, out TokenUsageBreakdown? usage, params string[] names)
+    {
+        usage = null;
+        if (!TryGetPropertyAny(info, out var tokenNode, names)
+            || tokenNode.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        var hasInput = TryGetLongAny(tokenNode, out var inputTokens, "input_tokens", "inputTokens");
+        var hasCached = TryGetLongAny(tokenNode, out var cachedInputTokens, "cached_input_tokens", "cachedInputTokens");
+        var hasOutput = TryGetLongAny(tokenNode, out var outputTokens, "output_tokens", "outputTokens");
+        var hasReasoning = TryGetLongAny(tokenNode, out var reasoningOutputTokens, "reasoning_output_tokens", "reasoningOutputTokens");
+        var hasTotal = TryGetLongAny(tokenNode, out var totalTokens, "total_tokens", "totalTokens");
+        if (!hasInput && !hasCached && !hasOutput && !hasReasoning && !hasTotal)
+        {
+            return false;
+        }
+
+        if (!hasTotal)
+        {
+            totalTokens = inputTokens + outputTokens;
+        }
+
+        usage = new TokenUsageBreakdown(
+            inputTokens,
+            cachedInputTokens,
+            outputTokens,
+            reasoningOutputTokens,
+            totalTokens);
+        return true;
     }
 
     private static void AddOrReplaceModel(List<ModelUsageSnapshot> models, ModelUsageSnapshot model)
@@ -762,4 +835,7 @@ public static class CodexSessionStateReader
     }
 }
 
-public sealed record CodexSessionStateSnapshot(CodexModelSelection? ActiveModel, IReadOnlyList<ModelUsageSnapshot> Models);
+public sealed record CodexSessionStateSnapshot(
+    CodexModelSelection? ActiveModel,
+    IReadOnlyList<ModelUsageSnapshot> Models,
+    TokenUsageSnapshot? TokenUsage = null);

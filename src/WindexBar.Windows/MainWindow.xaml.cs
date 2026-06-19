@@ -1,3 +1,4 @@
+using System.Globalization;
 using WindexBar.Core.Config;
 using WindexBar.Core.Models;
 using WindexBar.Core.Refresh;
@@ -16,7 +17,7 @@ namespace WindexBar.Windows;
 public sealed partial class MainWindow : Window
 {
     private const double HudClientWidth = 265;
-    private const double HudClientHeight = 240;
+    private const double HudClientHeight = 300;
     private const double SettingsClientWidth = HudClientWidth;
     private const double SettingsClientHeight = 152;
     private const double KeyboardScrollStep = 36;
@@ -31,6 +32,8 @@ public sealed partial class MainWindow : Window
     private double _targetCurrentBarValue;
     private double _weeklyBarValue;
     private double _targetWeeklyBarValue;
+    private double _tokenBarValue;
+    private double _targetTokenBarValue;
     private Grid TitleBarDragRegion = null!;
     private Border HudView = null!;
     private Border SettingsView = null!;
@@ -50,6 +53,11 @@ public sealed partial class MainWindow : Window
     private Border WeeklyWindowFillBar = null!;
     private Border WeeklyWindowSweepBar = null!;
     private TextBlock WeeklyWindowText = null!;
+    private TextBlock TokenWindowPercentText = null!;
+    private Grid TokenWindowTrackRoot = null!;
+    private Border TokenWindowFillBar = null!;
+    private Border TokenWindowSweepBar = null!;
+    private TextBlock TokenWindowText = null!;
     private TextBlock CreditsText = null!;
     private TextBlock AccountText = null!;
     private TextBlock ErrorText = null!;
@@ -157,7 +165,7 @@ public sealed partial class MainWindow : Window
         hudGrid.Children.Add(HudScrollViewer);
 
         var hudContent = new Grid { RowSpacing = 8 };
-        for (var i = 0; i < 8; i++)
+        for (var i = 0; i < 6; i++)
         {
             hudContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         }
@@ -203,27 +211,27 @@ public sealed partial class MainWindow : Window
         ModelContentPanel = new Grid { RowSpacing = 4 };
         ModelContentTransform = new TranslateTransform();
         ModelContentPanel.RenderTransform = ModelContentTransform;
-        for (var i = 0; i < 6; i++)
+        for (var i = 0; i < 9; i++)
         {
             ModelContentPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         }
 
         Grid.SetRow(ModelContentPanel, 2);
-        Grid.SetRowSpan(ModelContentPanel, 3);
         hudContent.Children.Add(ModelContentPanel);
 
         AddWindowSection(ModelContentPanel, 0, "Current", out CurrentWindowPercentText, out CurrentWindowTrackRoot, out CurrentWindowFillBar, out CurrentWindowSweepBar, out CurrentWindowText);
         AddWindowSection(ModelContentPanel, 3, "Weekly", out WeeklyWindowPercentText, out WeeklyWindowTrackRoot, out WeeklyWindowFillBar, out WeeklyWindowSweepBar, out WeeklyWindowText);
+        AddWindowSection(ModelContentPanel, 6, "Tokens", out TokenWindowPercentText, out TokenWindowTrackRoot, out TokenWindowFillBar, out TokenWindowSweepBar, out TokenWindowText);
 
-        CreditsText = AddLabelValueRow(hudContent, 5, "Credits");
-        AccountText = AddLabelValueRow(hudContent, 6, "Account");
+        CreditsText = AddLabelValueRow(hudContent, 3, "Credits");
+        AccountText = AddLabelValueRow(hudContent, 4, "Account");
 
         ErrorText = new TextBlock
         {
             Foreground = Brush(0xFF, 0xFF, 0x5F, 0x57),
             TextWrapping = TextWrapping.Wrap
         };
-        Grid.SetRow(ErrorText, 7);
+        Grid.SetRow(ErrorText, 5);
         hudContent.Children.Add(ErrorText);
 
         var hudButtons = new StackPanel
@@ -336,7 +344,7 @@ public sealed partial class MainWindow : Window
     private static TextBlock AddLabelValueRow(Grid root, int row, string label)
     {
         var grid = new Grid { ColumnSpacing = 8 };
-        if (row == 5)
+        if (row == 3)
         {
             grid.Margin = new Thickness(0, 4, 0, 0);
         }
@@ -482,6 +490,7 @@ public sealed partial class MainWindow : Window
         var activeWindowSweep = EaseSweep(_barSweepPhase);
         _currentBarValue = EaseBarValue(_currentBarValue, _targetCurrentBarValue);
         _weeklyBarValue = EaseBarValue(_weeklyBarValue, _targetWeeklyBarValue);
+        _tokenBarValue = EaseBarValue(_tokenBarValue, _targetTokenBarValue);
         ApplyActiveBarProgress(
             CurrentWindowTrackRoot,
             CurrentWindowFillBar,
@@ -495,6 +504,13 @@ public sealed partial class MainWindow : Window
             WeeklyWindowSweepBar,
             _weeklyBarValue,
             _targetWeeklyBarValue,
+            activeWindowSweep);
+        ApplyActiveBarProgress(
+            TokenWindowTrackRoot,
+            TokenWindowFillBar,
+            TokenWindowSweepBar,
+            _tokenBarValue,
+            _targetTokenBarValue,
             activeWindowSweep);
     }
 
@@ -642,6 +658,7 @@ public sealed partial class MainWindow : Window
 
         UpdateModelPager();
         ApplyActiveModel();
+        ApplyTokenUsageView(snapshot?.TokenUsage);
     }
 
     private void ApplyActiveModel()
@@ -653,6 +670,13 @@ public sealed partial class MainWindow : Window
         ModelPageText.Text = string.Empty;
         ApplyWindowView(CurrentWindowPercentText, CurrentWindowText, model?.Current, out _targetCurrentBarValue);
         ApplyWindowView(WeeklyWindowPercentText, WeeklyWindowText, model?.Weekly, out _targetWeeklyBarValue);
+    }
+
+    private void ApplyTokenUsageView(TokenUsageSnapshot? tokenUsage)
+    {
+        TokenWindowPercentText.Text = FormatTokenPercent(tokenUsage);
+        TokenWindowText.Text = FormatTokenUsage(tokenUsage);
+        _targetTokenBarValue = TokenContextPercent(tokenUsage) ?? 0;
     }
 
     private void BuildModelUsages()
@@ -833,7 +857,66 @@ public sealed partial class MainWindow : Window
         }
 
         var reset = window.ResetsAt is null ? string.Empty : $", resets {window.ResetDescription}";
-        return $"{window.RemainingPercent:0.#}% left ({window.UsedPercent:0.#}% used{reset})";
+        return $"Used {window.UsedPercent:0.#}%{reset}";
+    }
+
+    private static string FormatTokenPercent(TokenUsageSnapshot? tokenUsage)
+    {
+        var percent = TokenContextPercent(tokenUsage);
+        return percent is null ? "unknown" : $"{percent.Value:0.#}%";
+    }
+
+    private static string FormatTokenUsage(TokenUsageSnapshot? tokenUsage)
+    {
+        if (tokenUsage is null)
+        {
+            return "unknown";
+        }
+
+        var values = new List<string>();
+        var current = tokenUsage.Last ?? tokenUsage.Total;
+        if (current is not null && tokenUsage.ModelContextWindow is { } contextWindow)
+        {
+            values.Add($"Context: {FormatTokenCount(current.TotalTokens)} / {FormatTokenCount(contextWindow)}");
+        }
+        else if (current is not null)
+        {
+            values.Add($"Context: {FormatTokenCount(current.TotalTokens)}");
+        }
+
+        if (tokenUsage.Total is not null)
+        {
+            values.Add($"Session total: {FormatTokenCount(tokenUsage.Total.TotalTokens)}");
+        }
+
+        return values.Count == 0 ? "unknown" : string.Join(Environment.NewLine, values);
+    }
+
+    private static double? TokenContextPercent(TokenUsageSnapshot? tokenUsage)
+    {
+        var current = tokenUsage?.Last ?? tokenUsage?.Total;
+        if (current is null || tokenUsage?.ModelContextWindow is not { } contextWindow || contextWindow <= 0)
+        {
+            return null;
+        }
+
+        return Math.Clamp(current.TotalTokens * 100d / contextWindow, 0, 100);
+    }
+
+    private static string FormatTokenCount(long tokens)
+    {
+        var magnitude = Math.Abs(tokens);
+        if (magnitude >= 1_000_000)
+        {
+            return (tokens / 1_000_000d).ToString("0.#", CultureInfo.InvariantCulture) + "M";
+        }
+
+        if (magnitude >= 1_000)
+        {
+            return (tokens / 1_000d).ToString("0.#", CultureInfo.InvariantCulture) + "K";
+        }
+
+        return tokens.ToString(CultureInfo.InvariantCulture);
     }
 
     private static string FormatIdentity(ProviderIdentitySnapshot? identity)

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using WindexBar.Core.Models;
 using WindexBar.Core.Config;
@@ -40,6 +41,7 @@ var payload = new ProviderPayload(
     store.Snapshot?.UpdatedAt,
     store.Snapshot?.Primary,
     store.Snapshot?.Secondary,
+    store.Snapshot?.TokenUsage,
     store.Credits?.Remaining,
     store.Snapshot?.Identity?.AccountEmail,
     store.Snapshot?.Identity?.LoginMethod,
@@ -60,6 +62,11 @@ else
         Console.WriteLine($"  Credits: {payload.CreditsRemaining:0.##}");
     }
 
+    if (payload.TokenUsage is not null)
+    {
+        Console.WriteLine($"  Tokens:  {FormatTokenUsage(payload.TokenUsage)}");
+    }
+
     if (!string.IsNullOrWhiteSpace(payload.Error))
     {
         Console.WriteLine($"  Warning: {payload.Error}");
@@ -72,7 +79,7 @@ static int WriteError(CliOutputPreferences output, string provider, string error
 {
     if (output.Json)
     {
-        Console.WriteLine(JsonSerializer.Serialize(new ProviderPayload(provider, "auto", null, null, null, null, null, null, error), JsonOptions()));
+        Console.WriteLine(JsonSerializer.Serialize(new ProviderPayload(provider, "auto", null, null, null, null, null, null, null, error), JsonOptions()));
     }
     else
     {
@@ -96,6 +103,43 @@ static string? OptionValue(string[] args, string name)
 }
 
 static string Format(double? percent) => percent is null ? "unknown" : $"{percent:0.#}%";
+
+static string FormatTokenUsage(TokenUsageSnapshot tokenUsage)
+{
+    var values = new List<string>();
+    var current = tokenUsage.Last ?? tokenUsage.Total;
+    if (current is not null && tokenUsage.ModelContextWindow is { } window)
+    {
+        values.Add($"context {FormatTokenCount(current.TotalTokens)} / {FormatTokenCount(window)}");
+    }
+    else if (current is not null)
+    {
+        values.Add($"context {FormatTokenCount(current.TotalTokens)}");
+    }
+
+    if (tokenUsage.Total is not null)
+    {
+        values.Add($"session total {FormatTokenCount(tokenUsage.Total.TotalTokens)}");
+    }
+
+    return values.Count == 0 ? "unknown" : string.Join(", ", values);
+}
+
+static string FormatTokenCount(long tokens)
+{
+    var magnitude = Math.Abs(tokens);
+    if (magnitude >= 1_000_000)
+    {
+        return (tokens / 1_000_000d).ToString("0.#", CultureInfo.InvariantCulture) + "M";
+    }
+
+    if (magnitude >= 1_000)
+    {
+        return (tokens / 1_000d).ToString("0.#", CultureInfo.InvariantCulture) + "K";
+    }
+
+    return tokens.ToString(CultureInfo.InvariantCulture);
+}
 
 static JsonSerializerOptions JsonOptions() => new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
@@ -129,6 +173,7 @@ internal sealed record ProviderPayload(
     DateTimeOffset? UpdatedAt,
     RateWindow? Primary,
     RateWindow? Secondary,
+    TokenUsageSnapshot? TokenUsage,
     double? CreditsRemaining,
     string? AccountEmail,
     string? Plan,

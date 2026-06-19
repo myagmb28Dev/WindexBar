@@ -514,7 +514,7 @@ public sealed class CodexSessionStateReaderTests
         File.WriteAllText(userPath, """
         {"timestamp":"2026-06-18T00:59:00Z","type":"session_meta","payload":{"id":"user","thread_source":"user","source":"desktop"}}
         {"timestamp":"2026-06-18T00:59:01Z","type":"turn_context","payload":{"model":"gpt-5.3-codex-spark","effort":"xhigh"}}
-        {"timestamp":"2026-06-18T00:59:02Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"gpt-5.3-codex-spark","limit_name":null,"primary":{"used_percent":20.0,"window_minutes":300,"resets_at":1800000000},"secondary":{"used_percent":6.0,"window_minutes":10080,"resets_at":1800100000},"plan_type":"pro"}}}
+        {"timestamp":"2026-06-18T00:59:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":35223,"cached_input_tokens":26880,"output_tokens":1137,"reasoning_output_tokens":569,"total_tokens":36360},"last_token_usage":{"input_tokens":18316,"cached_input_tokens":16768,"output_tokens":555,"reasoning_output_tokens":230,"total_tokens":18871},"model_context_window":258400},"rate_limits":{"limit_id":"gpt-5.3-codex-spark","limit_name":null,"primary":{"used_percent":20.0,"window_minutes":300,"resets_at":1800000000},"secondary":{"used_percent":6.0,"window_minutes":10080,"resets_at":1800100000},"plan_type":"pro"}}}
         """);
 
         var state = CodexSessionStateReader.ReadLatestState(TestEnvironment(codexHome));
@@ -525,6 +525,11 @@ public sealed class CodexSessionStateReaderTests
         Assert.Equal("GPT-5.3 Codex Spark", model.ModelName);
         Assert.Equal(20, model.Current!.UsedPercent);
         Assert.Equal(6, model.Weekly!.UsedPercent);
+        Assert.NotNull(state.TokenUsage);
+        Assert.Equal(36360, state.TokenUsage!.Total!.TotalTokens);
+        Assert.Equal(26880, state.TokenUsage.Total.CachedInputTokens);
+        Assert.Equal(18871, state.TokenUsage.Last!.TotalTokens);
+        Assert.Equal(258400, state.TokenUsage.ModelContextWindow);
     }
 
     [Fact]
@@ -541,6 +546,38 @@ public sealed class CodexSessionStateReaderTests
 
         Assert.NotNull(selection);
         Assert.Equal("GPT-5.5 High", selection!.DisplayName);
+    }
+
+    [Fact]
+    public async Task CodexCliFetchDoesNotFallBackToSessionUsageWhenRpcFails()
+    {
+        var testRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var binDir = Path.Combine(testRoot, "bin");
+        var codexHome = Path.Combine(testRoot, "codex-home");
+        var sessionDir = Path.Combine(codexHome, "sessions", "2026", "06", "18");
+        Directory.CreateDirectory(binDir);
+        Directory.CreateDirectory(sessionDir);
+        File.WriteAllText(Path.Combine(binDir, "codex.cmd"), "@echo off\r\n");
+        File.WriteAllText(Path.Combine(sessionDir, "rollout-user.jsonl"), """
+        {"timestamp":"2026-06-18T00:59:00Z","type":"session_meta","payload":{"id":"user","thread_source":"user","source":"desktop"}}
+        {"timestamp":"2026-06-18T00:59:01Z","type":"turn_context","payload":{"model":"gpt-5.3-codex-spark","effort":"xhigh"}}
+        {"timestamp":"2026-06-18T00:59:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"output_tokens":200,"total_tokens":1200},"last_token_usage":{"input_tokens":900,"output_tokens":100,"total_tokens":1000},"model_context_window":258400},"rate_limits":{"limit_id":"gpt-5.3-codex-spark","primary":{"used_percent":20.0,"window_minutes":300,"resets_at":1800000000}}}}
+        """);
+
+        var strategy = new CodexCliFetchStrategy(new QueueCodexRpcTransportFactory([Array.Empty<string>()]));
+        var context = new ProviderFetchContext(
+            UsageProvider.Codex,
+            new Dictionary<string, string>
+            {
+                ["PATH"] = binDir,
+                ["PATHEXT"] = ".CMD",
+                ["CODEX_HOME"] = codexHome
+            },
+            IncludeCredits: true,
+            InitializeTimeout: TimeSpan.FromMilliseconds(20),
+            RequestTimeout: TimeSpan.FromMilliseconds(20));
+
+        await Assert.ThrowsAsync<CodexRpcTimeoutException>(() => strategy.FetchAsync(context, CancellationToken.None));
     }
 
     private static IReadOnlyDictionary<string, string> TestEnvironment(string codexHome) => new Dictionary<string, string>

@@ -1,3 +1,4 @@
+using System.Globalization;
 using WindexBar.Core.Config;
 using WindexBar.Core.Models;
 using WindexBar.Core.Refresh;
@@ -155,14 +156,58 @@ public sealed class TrayIconService : IDisposable
 
         if (snapshot?.Primary is null)
         {
-            return "WindexBar - Codex usage unknown";
+            var tokenOnlyText = TooltipTokenText(snapshot?.TokenUsage);
+            return tokenOnlyText is null
+                ? "WindexBar - Codex usage unknown"
+                : TrimTooltip($"WindexBar - tokens {tokenOnlyText}");
         }
 
         var creditsText = credits is null ? string.Empty : $", credits {credits.Remaining:0.##}";
-        return TrimTooltip($"WindexBar - session {snapshot.Primary.RemainingPercent:0.#}% left{creditsText}");
+        var tokenText = TooltipTokenText(snapshot.TokenUsage);
+        var tokens = tokenText is null ? string.Empty : $", tokens {tokenText}";
+        return TrimTooltip($"WindexBar - session {snapshot.Primary.RemainingPercent:0.#}% left{creditsText}{tokens}");
     }
 
     private static string TrimTooltip(string text) => text.Length <= 63 ? text : text[..63];
+
+    private static string? TooltipTokenText(TokenUsageSnapshot? tokenUsage)
+    {
+        var contextPercent = TokenContextPercent(tokenUsage);
+        if (contextPercent is not null)
+        {
+            return $"ctx {contextPercent.Value.ToString("0.#", CultureInfo.InvariantCulture)}%";
+        }
+
+        var sessionTokens = tokenUsage?.Total?.TotalTokens;
+        return sessionTokens is null ? null : $"session {FormatTokenCount(sessionTokens.Value)}";
+    }
+
+    private static double? TokenContextPercent(TokenUsageSnapshot? tokenUsage)
+    {
+        var current = tokenUsage?.Last ?? tokenUsage?.Total;
+        if (current is null || tokenUsage?.ModelContextWindow is not { } contextWindow || contextWindow <= 0)
+        {
+            return null;
+        }
+
+        return Math.Clamp(current.TotalTokens * 100d / contextWindow, 0, 100);
+    }
+
+    private static string FormatTokenCount(long tokens)
+    {
+        var magnitude = Math.Abs(tokens);
+        if (magnitude >= 1_000_000)
+        {
+            return (tokens / 1_000_000d).ToString("0.#", CultureInfo.InvariantCulture) + "M";
+        }
+
+        if (magnitude >= 1_000)
+        {
+            return (tokens / 1_000d).ToString("0.#", CultureInfo.InvariantCulture) + "K";
+        }
+
+        return tokens.ToString(CultureInfo.InvariantCulture);
+    }
 
     private static Drawing.Icon LoadIcon()
     {
