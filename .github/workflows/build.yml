@@ -16,8 +16,6 @@ concurrency:
 env:
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
-  WINDOWS_CODESIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
-  WINDOWS_CODESIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PFX_PASSWORD }}
 
 jobs:
   build:
@@ -27,42 +25,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Resolve build version
-        id: build
-        shell: pwsh
-        run: |
-          $version = '0.0.${{ github.run_number }}'
-          "version=$version" >> $env:GITHUB_OUTPUT
-
       - name: Set up .NET SDK
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
-
-      - name: Install Inno Setup
-        shell: pwsh
-        run: choco install innosetup --no-progress -y
-
-      - name: Import code signing certificate
-        shell: pwsh
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_PFX_BASE64)) {
-            Write-Warning 'WINDOWS_CODESIGN_PFX_BASE64 is not set. Installer will be built without a CI-provided signing certificate.'
-            return
-          }
-
-          $pfxPath = Join-Path $env:RUNNER_TEMP 'windexbar-codesign.pfx'
-          $bytes = [Convert]::FromBase64String($env:WINDOWS_CODESIGN_PFX_BASE64)
-          [IO.File]::WriteAllBytes($pfxPath, $bytes)
-
-          if ([string]::IsNullOrEmpty($env:WINDOWS_CODESIGN_PFX_PASSWORD)) {
-            $password = New-Object System.Security.SecureString
-          } else {
-            $password = ConvertTo-SecureString $env:WINDOWS_CODESIGN_PFX_PASSWORD -AsPlainText -Force
-          }
-
-          Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\CurrentUser\My -Password $password | Out-Null
-          Remove-Item -LiteralPath $pfxPath -Force
 
       - name: Restore
         shell: pwsh
@@ -80,37 +46,3 @@ jobs:
           -p:BuildInParallel=false
           -p:UseSharedCompilation=false
           -p:NuGetAudit=false
-
-      - name: Build installer
-        shell: cmd
-        run: build-installer.cmd ${{ steps.build.outputs.version }}
-
-      - name: Collect installer metadata
-        id: installer
-        shell: pwsh
-        run: |
-          $installer = Get-ChildItem -Path .\artifacts\installer -Filter WindexBarSetup.exe -Recurse |
-            Sort-Object LastWriteTime -Descending |
-            Select-Object -First 1
-
-          if (-not $installer) {
-            throw 'WindexBarSetup.exe was not produced.'
-          }
-
-          $hash = (Get-FileHash -Path $installer.FullName -Algorithm SHA256).Hash
-          $signature = Get-AuthenticodeSignature -FilePath $installer.FullName
-
-          "path=$($installer.FullName)" >> $env:GITHUB_OUTPUT
-          "sha256=$hash" >> $env:GITHUB_OUTPUT
-          "signature_status=$($signature.Status)" >> $env:GITHUB_OUTPUT
-
-          Write-Host "Installer: $($installer.FullName)"
-          Write-Host "SHA256: $hash"
-          Write-Host "Signature: $($signature.Status)"
-
-      - name: Upload installer artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: WindexBarSetup-${{ steps.build.outputs.version }}
-          path: ${{ steps.installer.outputs.path }}
-          if-no-files-found: error
