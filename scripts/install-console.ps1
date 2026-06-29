@@ -305,7 +305,8 @@ try {
 
     $dotnet = Join-Path $RootPath '.dotnet\dotnet.exe'
     if (-not (Test-Path -LiteralPath $dotnet)) {
-        throw "Bundled .NET was not found: $dotnet"
+        $programFilesDotnet = Join-Path $env:ProgramFiles 'dotnet\dotnet.exe'
+        $dotnet = if (Test-Path -LiteralPath $programFilesDotnet) { $programFilesDotnet } else { 'dotnet' }
     }
 
     $project = Join-Path $RootPath 'src\WindexBar.Windows\WindexBar.Windows.csproj'
