@@ -35,8 +35,8 @@ jobs:
             $version = $version.Substring(1)
           }
 
-          if ($version -notmatch '^\d+\.\d+\.\d+([-.+][0-9A-Za-z.-]+)?$') {
-            throw "Tag must look like v1.2.3. Received: $env:GITHUB_REF_NAME"
+          if ($version -notmatch '^\d+\.\d+(\.\d+)?([-.+][0-9A-Za-z.-]+)?$') {
+            throw "Tag must look like v1.2 or v1.2.3. Received: $env:GITHUB_REF_NAME"
           }
 
           "version=$version" >> $env:GITHUB_OUTPUT
