@@ -14,7 +14,9 @@ WindexBar is a small Windows tray app for quickly checking Codex usage and statu
 - Remaining ChatGPT credits when Codex exposes the balance.
 - Settings for refresh interval, language, and the Alt+O show/hide shortcut.
 
-Reset-credit expiration estimates are local best-effort estimates. They are calculated only for banked reset credits observed after this update; credits that already existed when WindexBar first sees them may show an unknown expiry. Estimated dates can be off because Codex currently exposes the available count, not individual grant or expiration timestamps.
+Bank-reset expiration estimates are local best-effort estimates.
+They are calculated only for banked reset credits observed since v.1.2.
+Bank-resets that existed prior to v.1.2 may show an unknown expiry
 
 ## Install
 
