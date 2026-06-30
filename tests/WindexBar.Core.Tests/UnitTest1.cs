@@ -4,6 +4,7 @@ using WindexBar.Core.Formatting;
 using WindexBar.Core.Providers;
 using WindexBar.Core.Providers.Codex;
 using WindexBar.Core.Refresh;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 
 namespace WindexBar.Core.Tests;
@@ -883,6 +884,46 @@ public sealed class UsageStoreTests
             new ProviderIdentitySnapshot(UsageProvider.Codex, "me@example.com", null, "plus"));
         var credits = new CreditsSnapshot(creditsRemaining, Array.Empty<CreditEvent>(), now);
         return new ProviderFetchResult(usage, credits, "test", "test", ProviderFetchKind.LocalProbe);
+    }
+}
+
+public sealed class InstallerBuildScriptTests
+{
+    [Fact]
+    public void PublishUsesSizeOptimizedReleaseOptions()
+    {
+        var script = File.ReadAllText(FindRepositoryFile("build-installer.cmd"));
+
+        Assert.Contains("-p:PublishTrimmed=true", script, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("-p:PublishReadyToRun=false", script, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("-p:DebugType=None", script, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("-p:DebugSymbols=false", script, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("-p:ILLinkTreatWarningsAsErrors=false", script, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string FindRepositoryFile(string fileName, [CallerFilePath] string sourceFilePath = "")
+    {
+        foreach (var start in new[] { Path.GetDirectoryName(sourceFilePath), Directory.GetCurrentDirectory(), AppContext.BaseDirectory })
+        {
+            if (string.IsNullOrWhiteSpace(start))
+            {
+                continue;
+            }
+
+            var directory = new DirectoryInfo(start);
+            while (directory is not null)
+            {
+                var path = Path.Combine(directory.FullName, fileName);
+                if (File.Exists(path))
+                {
+                    return path;
+                }
+
+                directory = directory.Parent;
+            }
+        }
+
+        throw new FileNotFoundException($"Could not find repository file `{fileName}`.");
     }
 }
 

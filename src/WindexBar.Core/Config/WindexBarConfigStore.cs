@@ -1,15 +1,10 @@
 using System.Text.Json;
+using WindexBar.Core;
 
 namespace WindexBar.Core.Config;
 
 public sealed class WindexBarConfigStore
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        WriteIndented = true
-    };
-
     public WindexBarConfigStore(string? filePath = null)
     {
         FilePath = filePath ?? DefaultPath();
@@ -27,14 +22,14 @@ public sealed class WindexBarConfigStore
         }
 
         var json = File.ReadAllText(FilePath);
-        var config = JsonSerializer.Deserialize<WindexBarConfig>(json, JsonOptions) ?? WindexBarConfig.Default();
+        var config = JsonSerializer.Deserialize(json, WindexBarJsonContext.Default.WindexBarConfig) ?? WindexBarConfig.Default();
         return config.Normalized();
     }
 
     public void Save(WindexBarConfig config)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-        var json = JsonSerializer.Serialize(config.Normalized(), JsonOptions);
+        var json = JsonSerializer.Serialize(config.Normalized(), WindexBarJsonContext.Default.WindexBarConfig);
         File.WriteAllText(FilePath, json);
     }
 

@@ -1,5 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization.Metadata;
+using WindexBar.Core;
 
 namespace WindexBar.Core.Providers.Codex;
 
@@ -35,7 +37,7 @@ public sealed class CodexRpcClient : IAsyncDisposable
 
     public async Task InitializeAsync(CancellationToken cancellationToken)
     {
-        _ = await RequestAsync<JsonObject>(
+        await RequestAsync(
             "initialize",
             new JsonObject
             {
@@ -56,12 +58,29 @@ public sealed class CodexRpcClient : IAsyncDisposable
     }
 
     public Task<RpcRateLimitsResponse> FetchRateLimitsAsync(CancellationToken cancellationToken) =>
-        RequestAsync<RpcRateLimitsResponse>("account/rateLimits/read", null, _requestTimeout, cancellationToken);
+        RequestAsync("account/rateLimits/read", null, _requestTimeout, WindexBarJsonContext.Default.RpcRateLimitsResponse, cancellationToken);
 
     public Task<RpcAccountResponse> FetchAccountAsync(CancellationToken cancellationToken) =>
-        RequestAsync<RpcAccountResponse>("account/read", null, _requestTimeout, cancellationToken);
+        RequestAsync("account/read", null, _requestTimeout, WindexBarJsonContext.Default.RpcAccountResponse, cancellationToken);
 
-    private async Task<T> RequestAsync<T>(string method, JsonObject? parameters, TimeSpan timeout, CancellationToken cancellationToken)
+    private async Task RequestAsync(string method, JsonObject? parameters, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        _ = await RequestResultAsync(method, parameters, timeout, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<T> RequestAsync<T>(
+        string method,
+        JsonObject? parameters,
+        TimeSpan timeout,
+        JsonTypeInfo<T> resultTypeInfo,
+        CancellationToken cancellationToken)
+    {
+        var result = await RequestResultAsync(method, parameters, timeout, cancellationToken).ConfigureAwait(false);
+        return JsonSerializer.Deserialize(result.GetRawText(), resultTypeInfo)
+            ?? throw new CodexRpcException("Codex returned an empty JSON-RPC result.");
+    }
+
+    private async Task<JsonElement> RequestResultAsync(string method, JsonObject? parameters, TimeSpan timeout, CancellationToken cancellationToken)
     {
         var id = _nextId++;
         var payload = new JsonObject
@@ -87,32 +106,37 @@ public sealed class CodexRpcClient : IAsyncDisposable
                     continue;
                 }
 
-                var message = JsonNode.Parse(line)?.AsObject()
-                    ?? throw new CodexRpcException("Codex returned invalid JSON-RPC data.");
+                using var message = JsonDocument.Parse(line);
+                var root = message.RootElement;
+                if (root.ValueKind != JsonValueKind.Object)
+                {
+                    throw new CodexRpcException("Codex returned invalid JSON-RPC data.");
+                }
 
-                if (!message.TryGetPropertyValue("id", out var messageIdNode) || messageIdNode is null)
+                if (!root.TryGetProperty("id", out var messageIdNode))
                 {
                     continue;
                 }
 
-                if (messageIdNode.GetValue<int>() != id)
+                if (!messageIdNode.TryGetInt32(out var messageId) || messageId != id)
                 {
                     continue;
                 }
 
-                if (message.TryGetPropertyValue("error", out var errorNode) && errorNode is JsonObject errorObject)
+                if (root.TryGetProperty("error", out var errorNode) && errorNode.ValueKind == JsonValueKind.Object)
                 {
-                    var messageText = errorObject["message"]?.GetValue<string>() ?? "Codex RPC request failed.";
-                    throw new CodexRpcException(messageText);
+                    var messageText = errorNode.TryGetProperty("message", out var messageTextNode) && messageTextNode.ValueKind == JsonValueKind.String
+                        ? messageTextNode.GetString()
+                        : null;
+                    throw new CodexRpcException(messageText ?? "Codex RPC request failed.");
                 }
 
-                if (!message.TryGetPropertyValue("result", out var resultNode) || resultNode is null)
+                if (!root.TryGetProperty("result", out var resultNode))
                 {
                     throw new CodexRpcException("Codex returned a JSON-RPC response without result.");
                 }
 
-                return resultNode.Deserialize<T>(JsonOptions)
-                    ?? throw new CodexRpcException("Codex returned an empty JSON-RPC result.");
+                return resultNode.Clone();
             }
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)

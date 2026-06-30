@@ -35,7 +35,7 @@ if not defined ISCC (
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = 'Stop'; New-Item -ItemType Directory -Path '%PUBLISH_DIR%' -Force | Out-Null; New-Item -ItemType Directory -Path '%INSTALLER_DIR%' -Force | Out-Null; New-Item -ItemType Directory -Path '%INNO_OUTPUT_DIR%' -Force | Out-Null"
 if errorlevel 1 exit /b %errorlevel%
 
-"%DOTNET_EXE%" publish "%ROOT%src\WindexBar.Windows\WindexBar.Windows.csproj" -c Release -r win-x64 --self-contained true -p:Version=%APP_VERSION% -p:WindowsPackageType=None -p:WindowsAppSDKSelfContained=true -p:PublishReadyToRun=false -p:PublishTrimmed=false -p:NuGetAudit=false -o "%PUBLISH_DIR%"
+"%DOTNET_EXE%" publish "%ROOT%src\WindexBar.Windows\WindexBar.Windows.csproj" -c Release -r win-x64 --self-contained true -p:Version=%APP_VERSION% -p:WindowsPackageType=None -p:WindowsAppSDKSelfContained=true -p:PublishReadyToRun=false -p:PublishTrimmed=true -p:DebugType=None -p:DebugSymbols=false -p:ILLinkTreatWarningsAsErrors=false -p:NuGetAudit=false -o "%PUBLISH_DIR%"
 if errorlevel 1 exit /b %errorlevel%
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$files = Get-ChildItem -LiteralPath '%PUBLISH_DIR%' -File | Where-Object { $_.Name -like 'WindexBar*.exe' -or $_.Name -like 'WindexBar*.dll' }; if ($files) { & '%ROOT%scripts\sign-app.ps1' -Path $files.FullName -WarnOnly }"
