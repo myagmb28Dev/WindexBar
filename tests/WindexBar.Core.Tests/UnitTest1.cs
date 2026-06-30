@@ -6,6 +6,7 @@ using WindexBar.Core.Providers.Codex;
 using WindexBar.Core.Refresh;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace WindexBar.Core.Tests;
 
@@ -924,6 +925,47 @@ public sealed class InstallerBuildScriptTests
         }
 
         throw new FileNotFoundException($"Could not find repository file `{fileName}`.");
+    }
+}
+
+public sealed class ReleaseWorkflowTests
+{
+    [Fact]
+    public void ReleaseVersionPatternAllowsMinorTags()
+    {
+        var workflow = File.ReadAllText(FindRepositoryFile(Path.Combine(".github", "workflows", "release.yml")));
+        var match = Regex.Match(workflow, "\\$version -notmatch '([^']+)'");
+
+        Assert.True(match.Success);
+        var versionPattern = match.Groups[1].Value;
+        Assert.Matches(versionPattern, "1.1");
+        Assert.Matches(versionPattern, "1.1.0");
+        Assert.DoesNotMatch(versionPattern, "1");
+    }
+
+    private static string FindRepositoryFile(string relativePath, [CallerFilePath] string sourceFilePath = "")
+    {
+        foreach (var start in new[] { Path.GetDirectoryName(sourceFilePath), Directory.GetCurrentDirectory(), AppContext.BaseDirectory })
+        {
+            if (string.IsNullOrWhiteSpace(start))
+            {
+                continue;
+            }
+
+            var directory = new DirectoryInfo(start);
+            while (directory is not null)
+            {
+                var path = Path.Combine(directory.FullName, relativePath);
+                if (File.Exists(path))
+                {
+                    return path;
+                }
+
+                directory = directory.Parent;
+            }
+        }
+
+        throw new FileNotFoundException($"Could not find repository file `{relativePath}`.");
     }
 }
 
