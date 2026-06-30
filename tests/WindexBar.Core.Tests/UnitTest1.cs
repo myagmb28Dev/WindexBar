@@ -646,7 +646,7 @@ public sealed class CodexSessionStateReaderTests
     }
 
     [Fact]
-    public void KeepsPriorityServiceTierOutOfDisplayName()
+    public void TreatsPriorityServiceTierAsFast()
     {
         var codexHome = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         var sessionDir = Path.Combine(codexHome, "sessions", "2026", "06", "18");
@@ -661,8 +661,8 @@ public sealed class CodexSessionStateReaderTests
         var selection = CodexSessionStateReader.ReadLatest(TestEnvironment(codexHome));
 
         Assert.NotNull(selection);
-        Assert.Equal("priority", selection!.ServiceTier);
-        Assert.Equal("GPT-5.5 High", selection.DisplayName);
+        Assert.Equal("fast", selection!.ServiceTier);
+        Assert.Equal("GPT-5.5 High Fast", selection.DisplayName);
     }
 
     [Fact]
@@ -740,6 +740,32 @@ public sealed class CodexSessionStateReaderTests
         model = "gpt-5.5"
         model_reasoning_effort = "high"
         service_tier = "fast"
+        """);
+
+        var selection = CodexSessionStateReader.ReadLatest(TestEnvironment(codexHome));
+
+        Assert.NotNull(selection);
+        Assert.Equal("fast", selection!.ServiceTier);
+        Assert.Equal("GPT-5.5 High Fast", selection.DisplayName);
+    }
+
+    [Fact]
+    public void MergesPriorityConfigServiceTierIntoSessionSelectionAsFast()
+    {
+        var codexHome = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(codexHome);
+        File.WriteAllText(Path.Combine(codexHome, "config.toml"), """
+        model = "gpt-5.5"
+        model_reasoning_effort = "high"
+        service_tier = "priority"
+        """);
+        var sessionDir = Path.Combine(codexHome, "sessions", "2026", "06", "18");
+        Directory.CreateDirectory(sessionDir);
+
+        var userPath = Path.Combine(sessionDir, "rollout-user.jsonl");
+        File.WriteAllText(userPath, """
+        {"timestamp":"2026-06-18T00:59:00Z","type":"session_meta","payload":{"id":"user","thread_source":"user","source":"desktop"}}
+        {"timestamp":"2026-06-18T00:59:01Z","type":"thread_settings_updated","payload":{"threadSettings":{"model":"gpt-5.5","effort":"high","collaborationMode":{"settings":{"model":"gpt-5.5","reasoning_effort":"high"}}}}}
         """);
 
         var selection = CodexSessionStateReader.ReadLatest(TestEnvironment(codexHome));

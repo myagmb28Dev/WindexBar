@@ -837,6 +837,7 @@ public static class CodexSessionStateReader
 
         return trimmed.ToLowerInvariant() switch
         {
+            "priority" => "fast",
             "default" or "normal" => "standard",
             var normalized => normalized
         };
