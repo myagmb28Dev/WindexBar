@@ -6,7 +6,6 @@ namespace WindexBar.Windows;
 internal static class StartupShortcutService
 {
     private const string ShortcutName = "WindexBar.lnk";
-    private static readonly Guid ShellLinkClsid = new("00021401-0000-0000-C000-000000000046");
 
     public static void Apply(bool enabled)
     {
@@ -46,8 +45,7 @@ internal static class StartupShortcutService
         var shortcutPath = StartupShortcutPath();
         Directory.CreateDirectory(Path.GetDirectoryName(shortcutPath)!);
 
-        var shellLinkType = Type.GetTypeFromCLSID(ShellLinkClsid, throwOnError: true)!;
-        var shellLink = (IShellLinkW)Activator.CreateInstance(shellLinkType)!;
+        var shellLink = (IShellLinkW)new ShellLink();
         shellLink.SetPath(targetPath);
         shellLink.SetWorkingDirectory(Path.GetDirectoryName(targetPath) ?? AppContext.BaseDirectory);
         shellLink.SetIconLocation(targetPath, 0);
@@ -68,6 +66,10 @@ internal static class StartupShortcutService
     private static string StartupShortcutPath() => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.Startup),
         ShortcutName);
+
+    [ComImport]
+    [Guid("00021401-0000-0000-C000-000000000046")]
+    private class ShellLink;
 
     [ComImport]
     [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]

@@ -1093,6 +1093,15 @@ public sealed class InstallerBuildScriptTests
         Assert.Contains("if ($QuietMissingCertificate)", signScript, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void StartupShortcutCreationAvoidsReflectionActivatorForTrimmedPublish()
+    {
+        var service = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "StartupShortcutService.cs")));
+
+        Assert.DoesNotContain("Type.GetTypeFromCLSID", service, StringComparison.Ordinal);
+        Assert.DoesNotContain("Activator.CreateInstance", service, StringComparison.Ordinal);
+    }
+
     private static string FindRepositoryFile(string fileName, [CallerFilePath] string sourceFilePath = "")
     {
         foreach (var start in new[] { Path.GetDirectoryName(sourceFilePath), Directory.GetCurrentDirectory(), AppContext.BaseDirectory })
