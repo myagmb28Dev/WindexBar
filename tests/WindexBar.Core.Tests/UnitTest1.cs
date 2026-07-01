@@ -345,6 +345,7 @@ public sealed class ConfigTests
         Assert.False(reloaded.ClickThroughHud);
         Assert.Equal(WindexBarConfig.DefaultLanguage, reloaded.Language);
         Assert.Equal(WindexBarConfig.DefaultToggleWindowHotkey, reloaded.Hotkeys.ToggleWindow);
+        Assert.True(reloaded.StartWithWindows);
     }
 
     [Fact]
@@ -382,6 +383,20 @@ public sealed class ConfigTests
         var reloaded = store.LoadOrCreateDefault();
 
         Assert.Equal(5, reloaded.GetProviderConfig(UsageProvider.Codex).RefreshIntervalSeconds);
+    }
+
+    [Fact]
+    public void PreservesSavedStartWithWindows()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
+        var store = new WindexBarConfigStore(path);
+        var config = store.LoadOrCreateDefault();
+        config.StartWithWindows = false;
+        store.Save(config);
+
+        var reloaded = store.LoadOrCreateDefault();
+
+        Assert.False(reloaded.StartWithWindows);
     }
 
     [Fact]

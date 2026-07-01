@@ -20,7 +20,7 @@ public sealed partial class MainWindow : Window
     private const double HudClientWidth = 265;
     private const double HudClientHeight = 318;
     private const double SettingsClientWidth = HudClientWidth;
-    private const double SettingsClientHeight = 240;
+    private const double SettingsClientHeight = 276;
     private const double KeyboardScrollStep = 36;
     private const double StandardBarSweepStep = 0.035;
     private const double FastBarSweepStep = 0.075;
@@ -81,6 +81,7 @@ public sealed partial class MainWindow : Window
     private TextBlock SecondsLabelText = null!;
     private TextBlock LanguageLabelText = null!;
     private TextBlock ToggleHotkeyLabelText = null!;
+    private CheckBox StartWithWindowsCheckBox = null!;
     private Button SettingsButton = null!;
     private Button QuitButton = null!;
     private Button CancelSettingsButton = null!;
@@ -407,6 +408,7 @@ public sealed partial class MainWindow : Window
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         SettingsView.Child = grid;
 
         SettingsTitleText = new TextBlock
@@ -483,13 +485,20 @@ public sealed partial class MainWindow : Window
         Grid.SetColumn(ToggleHotkeyTextBox, 1);
         hotkeyGrid.Children.Add(ToggleHotkeyTextBox);
 
+        StartWithWindowsCheckBox = new CheckBox
+        {
+            Content = "Start with Windows"
+        };
+        Grid.SetRow(StartWithWindowsCheckBox, 4);
+        grid.Children.Add(StartWithWindowsCheckBox);
+
         var buttons = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Right,
             Spacing = 6
         };
-        Grid.SetRow(buttons, 4);
+        Grid.SetRow(buttons, 5);
         grid.Children.Add(buttons);
         CancelSettingsButton = new Button { Content = "Cancel" };
         CancelSettingsButton.Click += CancelSettingsButton_Click;
@@ -516,6 +525,7 @@ public sealed partial class MainWindow : Window
     {
         RefreshIntervalSecondsTextBox.Text = _settingsStore.Codex.RefreshIntervalSeconds.ToString();
         ToggleHotkeyTextBox.Text = _settingsStore.Config.Hotkeys.ToggleWindow;
+        StartWithWindowsCheckBox.IsChecked = _settingsStore.Config.StartWithWindows;
         SelectLanguage(_settingsStore.Config.Language);
         HudView.Visibility = Visibility.Collapsed;
         SettingsView.Visibility = Visibility.Visible;
@@ -712,7 +722,9 @@ public sealed partial class MainWindow : Window
             config.Hotkeys.ToggleWindow = HotkeyShortcut.NormalizeOrDefault(
                 ToggleHotkeyTextBox.Text,
                 WindexBarConfig.DefaultToggleWindowHotkey);
+            config.StartWithWindows = StartWithWindowsCheckBox.IsChecked == true;
         });
+        StartupShortcutService.Apply(_settingsStore.Config.StartWithWindows);
         _usageStore.StartBackgroundRefresh();
         ShowHudView();
     }
@@ -769,6 +781,7 @@ public sealed partial class MainWindow : Window
         SecondsLabelText.Text = Text("s", "\uCD08");
         LanguageLabelText.Text = Text("Language", "\uC5B8\uC5B4");
         ToggleHotkeyLabelText.Text = Text("Toggle shortcut", "\uD1A0\uAE00 \uB2E8\uCD95\uD0A4");
+        StartWithWindowsCheckBox.Content = Text("Start with Windows", "Windows \uC2DC\uC791 \uC2DC \uC2E4\uD589");
         CancelSettingsButton.Content = Text("Cancel", "\uCDE8\uC18C");
         SaveSettingsButton.Content = Text("Save", "\uC800\uC7A5");
     }

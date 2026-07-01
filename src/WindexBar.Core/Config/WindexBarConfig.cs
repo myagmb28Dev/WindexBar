@@ -5,12 +5,13 @@ namespace WindexBar.Core.Config;
 
 public sealed class WindexBarConfig
 {
-    public const int CurrentVersion = 3;
+    public const int CurrentVersion = 4;
     public const int MinRefreshIntervalSeconds = 1;
     public const int DefaultRefreshIntervalSeconds = 30;
     public const int MaxRefreshIntervalSeconds = 3600;
     public const string DefaultLanguage = "en";
     public const string DefaultToggleWindowHotkey = "Alt+O";
+    public const bool DefaultStartWithWindows = true;
 
     [JsonPropertyName("version")]
     public int Version { get; set; } = CurrentVersion;
@@ -20,6 +21,9 @@ public sealed class WindexBarConfig
 
     [JsonPropertyName("clickThroughHud")]
     public bool ClickThroughHud { get; set; }
+
+    [JsonPropertyName("startWithWindows")]
+    public bool StartWithWindows { get; set; } = DefaultStartWithWindows;
 
     [JsonPropertyName("language")]
     public string Language { get; set; } = DefaultLanguage;

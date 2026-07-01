@@ -35,6 +35,7 @@ public partial class App : WinApplication
         }
 
         SettingsStore = new SettingsStore(new WindexBarConfigStore());
+        StartupShortcutService.RemoveIfDisabled(SettingsStore.Config.StartWithWindows);
         LogMessage("Settings loaded.");
         _singleInstanceMutex = new Mutex(initiallyOwned: true, AppMutexName, out var ownsMutex);
         if (!ownsMutex)
