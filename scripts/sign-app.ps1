@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory = $true)]
     [string[]]$Path,
-    [switch]$WarnOnly
+    [switch]$WarnOnly,
+    [switch]$QuietMissingCertificate
 )
 
 $ErrorActionPreference = 'Stop'
@@ -43,6 +44,10 @@ function Get-WindexBarCodeSigningCertificate {
 
 $certificate = Get-WindexBarCodeSigningCertificate
 if (-not $certificate) {
+    if ($QuietMissingCertificate) {
+        exit 0
+    }
+
     Write-SignWarning 'No current-user code signing certificate with a private key was found. Windows Application Control may block the app.'
     exit 0
 }

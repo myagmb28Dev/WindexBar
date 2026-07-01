@@ -1082,6 +1082,17 @@ public sealed class InstallerBuildScriptTests
         Assert.Contains("-p:ILLinkTreatWarningsAsErrors=false", script, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void ConsoleInstallSilencesMissingCertificateWarningDuringOptionalSigning()
+    {
+        var installScript = File.ReadAllText(FindRepositoryFile(Path.Combine("scripts", "install-console.ps1")));
+        var signScript = File.ReadAllText(FindRepositoryFile(Path.Combine("scripts", "sign-app.ps1")));
+
+        Assert.Contains("-QuietMissingCertificate", installScript, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[switch]$QuietMissingCertificate", signScript, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("if ($QuietMissingCertificate)", signScript, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string FindRepositoryFile(string fileName, [CallerFilePath] string sourceFilePath = "")
     {
         foreach (var start in new[] { Path.GetDirectoryName(sourceFilePath), Directory.GetCurrentDirectory(), AppContext.BaseDirectory })
