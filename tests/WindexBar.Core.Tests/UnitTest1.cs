@@ -1265,7 +1265,10 @@ public sealed class ReleaseWorkflowTests
         Assert.Contains("Added:", workflow, StringComparison.Ordinal);
         Assert.Contains("Hotfix:", workflow, StringComparison.Ordinal);
         Assert.Contains("Get-ReleaseNoteSection", workflow, StringComparison.Ordinal);
+        Assert.Contains("$generatedNotes = @(gh api", workflow, StringComparison.Ordinal);
+        Assert.Contains("$body = $generatedNotes -join [Environment]::NewLine", workflow, StringComparison.Ordinal);
         Assert.Contains("Convert-ReleaseNotesSections $body", workflow, StringComparison.Ordinal);
+        Assert.Contains("\\b(hotfix|bug|crash|warning|blocked|failure|error)\\b", workflow, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryFile(string relativePath, [CallerFilePath] string sourceFilePath = "")

@@ -143,7 +143,7 @@ jobs:
 
             $normalized = $title.ToLowerInvariant()
             if ($normalized -match '^(fix|hotfix|repair|avoid|silence|resolve|restore)\b' -or
-                $normalized -match '\b(bug|crash|warning|blocked|failure|error)\b') {
+                $normalized -match '\b(hotfix|bug|crash|warning|blocked|failure|error)\b') {
               return 'Hotfix:'
             }
 
@@ -238,8 +238,9 @@ jobs:
             return ($output -join [Environment]::NewLine).TrimEnd()
           }
 
-          $body = gh api "repos/$env:GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$tag" --jq .body
+          $generatedNotes = @(gh api "repos/$env:GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$tag" --jq .body)
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $body = $generatedNotes -join [Environment]::NewLine
 
           $body = $body -replace '(?ms)\r?\n*\*\*Full Changelog\*\*:.*$', ''
           $body = Convert-ReleaseNotesSections $body
