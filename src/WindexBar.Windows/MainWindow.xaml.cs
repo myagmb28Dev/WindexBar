@@ -18,10 +18,14 @@ namespace WindexBar.Windows;
 public sealed partial class MainWindow : Window
 {
     private const double HudClientWidth = 265;
-    private const double HudClientHeight = 318;
+    private const double ContentClientHeight = 334;
     private const double SettingsClientWidth = HudClientWidth;
-    private const double SettingsClientHeight = 276;
     private const double KeyboardScrollStep = 36;
+    private const double SideBarCollapsedWidth = 6;
+    private const double SideBarExpandedWidth = 34;
+    private const double SideBarExpandedGap = 7;
+    private const double SideBarOuterWidth = SideBarExpandedWidth + SideBarExpandedGap;
+    private const double SideBarVisualWidth = SideBarOuterWidth + 10;
     private const double StandardBarSweepStep = 0.035;
     private const double FastBarSweepStep = 0.075;
     private const double StandardBarEaseFactor = 0.16;
@@ -42,9 +46,16 @@ public sealed partial class MainWindow : Window
     private double _tokenBarValue;
     private double _targetTokenBarValue;
     private bool _isFastServiceTier;
+    private bool _isSideBarOpen = true;
     private Grid TitleBarDragRegion = null!;
+    private Grid ContentRootGrid = null!;
+    private Grid SideBarHost = null!;
+    private ColumnDefinition SideBarColumn = null!;
+    private StackPanel SideBarPanel = null!;
     private Border HudView = null!;
+    private Border CreditsView = null!;
     private Border SettingsView = null!;
+    private Border ResetCreditDetailsView = null!;
     private ScrollViewer HudScrollViewer = null!;
     private Grid ModelContentPanel = null!;
     private TranslateTransform ModelContentTransform = null!;
@@ -66,29 +77,34 @@ public sealed partial class MainWindow : Window
     private Border TokenWindowFillBar = null!;
     private Border TokenWindowSweepBar = null!;
     private TextBlock TokenWindowText = null!;
-    private TextBlock CreditsText = null!;
-    private TextBlock ResetCreditsText = null!;
+    private TextBlock CreditsTitleText = null!;
+    private TextBlock CreditsDetailText = null!;
+    private TextBlock ResetCreditDetailsTitleText = null!;
+    private TextBlock ResetCreditSummaryText = null!;
+    private TextBlock ResetCreditDetailsText = null!;
     private TextBlock AccountText = null!;
     private TextBlock ErrorText = null!;
     private TextBlock CurrentWindowLabelText = null!;
     private TextBlock WeeklyWindowLabelText = null!;
     private TextBlock TokenWindowLabelText = null!;
-    private TextBlock CreditsLabelText = null!;
-    private TextBlock ResetCreditsLabelText = null!;
     private TextBlock AccountLabelText = null!;
     private TextBlock SettingsTitleText = null!;
     private TextBlock RefreshIntervalLabelText = null!;
     private TextBlock SecondsLabelText = null!;
     private TextBlock LanguageLabelText = null!;
     private TextBlock ToggleHotkeyLabelText = null!;
+    private TextBlock ToggleSidebarHotkeyLabelText = null!;
     private CheckBox StartWithWindowsCheckBox = null!;
     private Button SettingsButton = null!;
+    private Button ResetCreditDetailsButton = null!;
     private Button QuitButton = null!;
-    private Button CancelSettingsButton = null!;
     private Button SaveSettingsButton = null!;
     private TextBox RefreshIntervalSecondsTextBox = null!;
     private TextBox ToggleHotkeyTextBox = null!;
+    private TextBox ToggleSidebarHotkeyTextBox = null!;
     private ComboBox LanguageComboBox = null!;
+    private Button HomeButton = null!;
+    private Button CreditsButton = null!;
 
     public MainWindow(UsageStore usageStore, SettingsStore settingsStore)
     {
@@ -137,19 +153,25 @@ public sealed partial class MainWindow : Window
         RootLayout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
         var customTitleBar = new Grid { Background = Brush(0, 0, 0, 0) };
+        customTitleBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         customTitleBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         customTitleBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(60) });
         Grid.SetRow(customTitleBar, 0);
         RootLayout.Children.Add(customTitleBar);
 
-        TitleBarDragRegion = new Grid { Background = Brush(0, 0, 0, 0) };
-        TitleBarDragRegion.Children.Add(new TextBlock
+        var titleText = new TextBlock
         {
             Text = "WindexBar",
             Margin = new Thickness(10, 0, 0, 0),
+            Padding = new Thickness(0, 0, 12, 0),
             VerticalAlignment = VerticalAlignment.Center,
             Foreground = Brush(0xFF, 0xB9, 0xA7, 0xE8)
-        });
+        };
+        titleText.PointerPressed += TitleText_PointerPressed;
+        customTitleBar.Children.Add(titleText);
+
+        TitleBarDragRegion = new Grid { Background = Brush(0, 0, 0, 0) };
+        Grid.SetColumn(TitleBarDragRegion, 1);
         customTitleBar.Children.Add(TitleBarDragRegion);
 
         var windowButtons = new StackPanel
@@ -160,15 +182,53 @@ public sealed partial class MainWindow : Window
             Margin = new Thickness(0, 0, 12, 0),
             Spacing = 7
         };
-        Grid.SetColumn(windowButtons, 1);
+        Grid.SetColumn(windowButtons, 2);
         customTitleBar.Children.Add(windowButtons);
 
         windowButtons.Children.Add(CreateTitleButton(Brush(0xFF, 0xFF, 0xBD, 0x2E), MinimizeCircleButton_Click));
         windowButtons.Children.Add(CreateTitleButton(Brush(0xFF, 0x28, 0xC8, 0x40), ZoomCircleButton_Click));
 
-        var contentRoot = new Grid { Padding = new Thickness(10, 0, 10, 10) };
-        Grid.SetRow(contentRoot, 1);
-        RootLayout.Children.Add(contentRoot);
+        ContentRootGrid = new Grid { Padding = new Thickness(10, 0, 10, 10), ColumnSpacing = 0 };
+        SideBarColumn = new ColumnDefinition { Width = new GridLength(SideBarCollapsedWidth) };
+        ContentRootGrid.ColumnDefinitions.Add(SideBarColumn);
+        ContentRootGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetRow(ContentRootGrid, 1);
+        RootLayout.Children.Add(ContentRootGrid);
+
+        SideBarHost = new Grid
+        {
+            Width = SideBarVisualWidth,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Background = Brush(1, 0, 0, 0)
+        };
+        Grid.SetRow(SideBarHost, 1);
+
+        SideBarPanel = new StackPanel
+        {
+            Orientation = Orientation.Vertical,
+            Spacing = 7,
+            VerticalAlignment = VerticalAlignment.Top,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Width = SideBarVisualWidth,
+            Opacity = 0.72
+        };
+        SideBarHost.Children.Add(SideBarPanel);
+
+        HomeButton = CreateSideBarButton("\u2302");
+        HomeButton.Click += HomeButton_Click;
+        SideBarPanel.Children.Add(HomeButton);
+
+        CreditsButton = CreateSideBarButton("$");
+        CreditsButton.Click += CreditsButton_Click;
+        SideBarPanel.Children.Add(CreditsButton);
+
+        ResetCreditDetailsButton = CreateSideBarButton("\u21BB");
+        ResetCreditDetailsButton.Click += ResetCreditDetailsButton_Click;
+        SideBarPanel.Children.Add(ResetCreditDetailsButton);
+
+        SettingsButton = CreateSideBarButton("\u2699");
+        SettingsButton.Click += SettingsButton_Click;
+        SideBarPanel.Children.Add(SettingsButton);
 
         HudView = new Border
         {
@@ -178,7 +238,8 @@ public sealed partial class MainWindow : Window
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(14)
         };
-        contentRoot.Children.Add(HudView);
+        Grid.SetColumn(HudView, 1);
+        ContentRootGrid.Children.Add(HudView);
 
         var hudGrid = new Grid { RowSpacing = 7 };
         hudGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -195,7 +256,7 @@ public sealed partial class MainWindow : Window
         hudGrid.Children.Add(HudScrollViewer);
 
         var hudContent = new Grid { RowSpacing = 8 };
-        for (var i = 0; i < 7; i++)
+        for (var i = 0; i < 5; i++)
         {
             hudContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         }
@@ -253,16 +314,14 @@ public sealed partial class MainWindow : Window
         AddWindowSection(ModelContentPanel, 3, "Weekly", out WeeklyWindowLabelText, out WeeklyWindowPercentText, out WeeklyWindowTrackRoot, out WeeklyWindowFillBar, out WeeklyWindowSweepBar, out WeeklyWindowText);
         AddWindowSection(ModelContentPanel, 6, "Tokens", out TokenWindowLabelText, out TokenWindowPercentText, out TokenWindowTrackRoot, out TokenWindowFillBar, out TokenWindowSweepBar, out TokenWindowText);
 
-        CreditsText = AddLabelValueRow(hudContent, 3, "Credits", out CreditsLabelText);
-        ResetCreditsText = AddLabelValueRow(hudContent, 4, "Reset credits", out ResetCreditsLabelText);
-        AccountText = AddLabelValueRow(hudContent, 5, "Account", out AccountLabelText);
+        AccountText = AddLabelValueRow(hudContent, 3, "Account", out AccountLabelText);
 
         ErrorText = new TextBlock
         {
             Foreground = Brush(0xFF, 0xFF, 0x5F, 0x57),
             TextWrapping = TextWrapping.Wrap
         };
-        Grid.SetRow(ErrorText, 6);
+        Grid.SetRow(ErrorText, 4);
         hudContent.Children.Add(ErrorText);
 
         var hudButtons = new StackPanel
@@ -274,12 +333,22 @@ public sealed partial class MainWindow : Window
         };
         Grid.SetRow(hudButtons, 1);
         hudGrid.Children.Add(hudButtons);
-        SettingsButton = new Button { Content = "Settings" };
-        SettingsButton.Click += SettingsButton_Click;
-        QuitButton = new Button { Content = "Quit" };
+        QuitButton = CreateBackButton("Quit");
         QuitButton.Click += QuitButton_Click;
-        hudButtons.Children.Add(SettingsButton);
         hudButtons.Children.Add(QuitButton);
+
+        CreditsView = new Border
+        {
+            Padding = new Thickness(11, 9, 11, 9),
+            Background = Brush(0xFF, 0x1F, 0x1C, 0x24),
+            BorderBrush = Brush(0x99, 0x7D, 0x62, 0xC7),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(14),
+            Visibility = Visibility.Collapsed
+        };
+        Grid.SetColumn(CreditsView, 1);
+        ContentRootGrid.Children.Add(CreditsView);
+        BuildCreditsView();
 
         SettingsView = new Border
         {
@@ -290,8 +359,24 @@ public sealed partial class MainWindow : Window
             CornerRadius = new CornerRadius(14),
             Visibility = Visibility.Collapsed
         };
-        contentRoot.Children.Add(SettingsView);
+        Grid.SetColumn(SettingsView, 1);
+        ContentRootGrid.Children.Add(SettingsView);
         BuildSettingsView();
+
+        ResetCreditDetailsView = new Border
+        {
+            Padding = new Thickness(11, 9, 11, 9),
+            Background = Brush(0xFF, 0x1F, 0x1C, 0x24),
+            BorderBrush = Brush(0x99, 0x7D, 0x62, 0xC7),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(14),
+            Visibility = Visibility.Collapsed
+        };
+        Grid.SetColumn(ResetCreditDetailsView, 1);
+        ContentRootGrid.Children.Add(ResetCreditDetailsView);
+        BuildResetCreditDetailsView();
+        RootLayout.Children.Add(SideBarHost);
+        ApplySideBarProgress();
     }
 
     private static Button CreateTitleButton(Brush background, RoutedEventHandler handler)
@@ -308,6 +393,54 @@ public sealed partial class MainWindow : Window
         };
         button.Click += handler;
         return button;
+    }
+
+    private static Button CreateSideBarButton(object content)
+    {
+        var buttonContent = content is string text
+            ? new TextBlock
+            {
+                Text = text,
+                Width = 32,
+                TextAlignment = TextAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                FontSize = 15
+            }
+            : content;
+
+        return new Button
+        {
+            Content = buttonContent,
+            Width = 32,
+            Height = 32,
+            MinWidth = 32,
+            MinHeight = 32,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Padding = new Thickness(0),
+            FontSize = 15
+        };
+    }
+
+    private static void SetSideBarButtonText(Button button, string text)
+    {
+        if (button.Content is TextBlock textBlock)
+        {
+            textBlock.Text = text;
+            return;
+        }
+
+        button.Content = new TextBlock
+        {
+            Text = text,
+            Width = 32,
+            TextAlignment = TextAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            FontSize = 15
+        };
     }
 
     private static void AddWindowSection(
@@ -402,12 +535,14 @@ public sealed partial class MainWindow : Window
 
     private void BuildSettingsView()
     {
-        var grid = new Grid { RowSpacing = 11 };
+        var grid = new Grid { RowSpacing = 9 };
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         SettingsView.Child = grid;
 
@@ -485,11 +620,31 @@ public sealed partial class MainWindow : Window
         Grid.SetColumn(ToggleHotkeyTextBox, 1);
         hotkeyGrid.Children.Add(ToggleHotkeyTextBox);
 
+        var sidebarHotkeyGrid = new Grid { ColumnSpacing = 8 };
+        sidebarHotkeyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        sidebarHotkeyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(124) });
+        Grid.SetRow(sidebarHotkeyGrid, 4);
+        grid.Children.Add(sidebarHotkeyGrid);
+
+        ToggleSidebarHotkeyLabelText = new TextBlock
+        {
+            Text = "Sidebar shortcut",
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        sidebarHotkeyGrid.Children.Add(ToggleSidebarHotkeyLabelText);
+        ToggleSidebarHotkeyTextBox = new TextBox
+        {
+            TextAlignment = TextAlignment.Right,
+            MinWidth = 124
+        };
+        Grid.SetColumn(ToggleSidebarHotkeyTextBox, 1);
+        sidebarHotkeyGrid.Children.Add(ToggleSidebarHotkeyTextBox);
+
         StartWithWindowsCheckBox = new CheckBox
         {
             Content = "Start with Windows"
         };
-        Grid.SetRow(StartWithWindowsCheckBox, 4);
+        Grid.SetRow(StartWithWindowsCheckBox, 5);
         grid.Children.Add(StartWithWindowsCheckBox);
 
         var buttons = new StackPanel
@@ -498,14 +653,83 @@ public sealed partial class MainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Right,
             Spacing = 6
         };
-        Grid.SetRow(buttons, 5);
+        Grid.SetRow(buttons, 7);
         grid.Children.Add(buttons);
-        CancelSettingsButton = new Button { Content = "Cancel" };
-        CancelSettingsButton.Click += CancelSettingsButton_Click;
-        SaveSettingsButton = new Button { Content = "Save" };
+        SaveSettingsButton = CreateBackButton("Save");
         SaveSettingsButton.Click += SaveSettingsButton_Click;
-        buttons.Children.Add(CancelSettingsButton);
         buttons.Children.Add(SaveSettingsButton);
+    }
+
+    private void BuildCreditsView()
+    {
+        var grid = new Grid { RowSpacing = 10 };
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        CreditsView.Child = grid;
+
+        CreditsTitleText = new TextBlock
+        {
+            Text = "Credits",
+            FontSize = 18,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+        };
+        grid.Children.Add(CreditsTitleText);
+
+        CreditsDetailText = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = Brush(0xFF, 0xED, 0xE7, 0xFF)
+        };
+        Grid.SetRow(CreditsDetailText, 1);
+        grid.Children.Add(CreditsDetailText);
+
+    }
+
+    private void BuildResetCreditDetailsView()
+    {
+        var grid = new Grid { RowSpacing = 10 };
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        ResetCreditDetailsView.Child = grid;
+
+        ResetCreditDetailsTitleText = new TextBlock
+        {
+            Text = "Credit details",
+            FontSize = 18,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+        };
+        grid.Children.Add(ResetCreditDetailsTitleText);
+
+        ResetCreditSummaryText = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = Brush(0xFF, 0xED, 0xE7, 0xFF)
+        };
+        Grid.SetRow(ResetCreditSummaryText, 1);
+        grid.Children.Add(ResetCreditSummaryText);
+
+        ResetCreditDetailsText = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas"),
+            Foreground = Brush(0xFF, 0xED, 0xE7, 0xFF)
+        };
+        Grid.SetRow(ResetCreditDetailsText, 2);
+        grid.Children.Add(ResetCreditDetailsText);
+
+    }
+
+    private static Button CreateBackButton(object content)
+    {
+        return new Button
+        {
+            Content = content,
+            MinWidth = 56,
+            MinHeight = 26,
+            Padding = new Thickness(9, 2, 9, 2),
+            FontSize = 12
+        };
     }
 
     private static SolidColorBrush Brush(byte a, byte r, byte g, byte b) =>
@@ -513,7 +737,9 @@ public sealed partial class MainWindow : Window
 
     public void ShowHudView()
     {
+        CreditsView.Visibility = Visibility.Collapsed;
         SettingsView.Visibility = Visibility.Collapsed;
+        ResetCreditDetailsView.Visibility = Visibility.Collapsed;
         HudView.Visibility = Visibility.Visible;
         ApplyLanguage();
         ResizeForCurrentView();
@@ -521,17 +747,44 @@ public sealed partial class MainWindow : Window
         UpdateState();
     }
 
+    public void ShowCreditsView()
+    {
+        HudView.Visibility = Visibility.Collapsed;
+        SettingsView.Visibility = Visibility.Collapsed;
+        ResetCreditDetailsView.Visibility = Visibility.Collapsed;
+        CreditsView.Visibility = Visibility.Visible;
+        ApplyLanguage();
+        ResizeForCurrentView();
+        RootLayout.Focus(FocusState.Programmatic);
+        UpdateCredits(_usageStore.Credits);
+    }
+
     public void ShowSettingsView()
     {
         RefreshIntervalSecondsTextBox.Text = _settingsStore.Codex.RefreshIntervalSeconds.ToString();
         ToggleHotkeyTextBox.Text = _settingsStore.Config.Hotkeys.ToggleWindow;
+        ToggleSidebarHotkeyTextBox.Text = _settingsStore.Config.Hotkeys.ToggleSidebar;
         StartWithWindowsCheckBox.IsChecked = _settingsStore.Config.StartWithWindows;
         SelectLanguage(_settingsStore.Config.Language);
         HudView.Visibility = Visibility.Collapsed;
+        CreditsView.Visibility = Visibility.Collapsed;
+        ResetCreditDetailsView.Visibility = Visibility.Collapsed;
         SettingsView.Visibility = Visibility.Visible;
         ApplyLanguage();
         ResizeForCurrentView();
         _modelUsages.Clear();
+    }
+
+    public void ShowResetCreditDetailsView()
+    {
+        HudView.Visibility = Visibility.Collapsed;
+        CreditsView.Visibility = Visibility.Collapsed;
+        SettingsView.Visibility = Visibility.Collapsed;
+        ResetCreditDetailsView.Visibility = Visibility.Visible;
+        ApplyLanguage();
+        ResizeForCurrentView();
+        RootLayout.Focus(FocusState.Programmatic);
+        UpdateResetCreditDetails(_usageStore.Snapshot?.RateLimitResetCredits);
     }
 
     private void ConfigureCompactWindow()
@@ -558,19 +811,20 @@ public sealed partial class MainWindow : Window
     {
         if (SettingsView.Visibility == Visibility.Visible)
         {
-            ResizeClientToEffectiveSize(SettingsClientWidth, SettingsClientHeight);
+            ResizeClientToEffectiveSize(SettingsClientWidth, ContentClientHeight);
             return;
         }
 
-        ResizeClientToEffectiveSize(HudClientWidth, HudClientHeight);
+        ResizeClientToEffectiveSize(HudClientWidth, ContentClientHeight);
     }
 
     private void ResizeClientToEffectiveSize(double width, double height)
     {
         var scale = RootLayout.XamlRoot?.RasterizationScale ?? 1;
         var position = _windowPlacement.PositionForResize(new WindowPosition(AppWindow.Position.X, AppWindow.Position.Y));
+        var sideBarWidth = _isSideBarOpen ? SideBarOuterWidth : SideBarCollapsedWidth;
         AppWindow.ResizeClient(new SizeInt32(
-            (int)Math.Ceiling(width * scale),
+            (int)Math.Ceiling((width + sideBarWidth - SideBarCollapsedWidth) * scale),
             (int)Math.Ceiling(height * scale)));
         AppWindow.Move(new PointInt32(position.X, position.Y));
     }
@@ -626,6 +880,27 @@ public sealed partial class MainWindow : Window
         fillBar.Width = width * (safeValue / 100d);
         sweepBar.Width = width * (safeTarget * safeSweep / 100d);
         sweepBar.Opacity = 0.22 + (0.28 * safeSweep);
+    }
+
+    private void ApplySideBarProgress()
+    {
+        ApplySideBarLayout();
+    }
+
+    private void ApplySideBarLayout()
+    {
+        SideBarColumn.Width = new GridLength(_isSideBarOpen ? SideBarExpandedWidth : SideBarCollapsedWidth);
+        SideBarHost.Width = _isSideBarOpen ? SideBarVisualWidth : SideBarCollapsedWidth;
+        ContentRootGrid.ColumnSpacing = _isSideBarOpen ? SideBarExpandedGap : 0;
+        SideBarPanel.Opacity = _isSideBarOpen ? 0.72 : 0;
+        SideBarPanel.IsHitTestVisible = _isSideBarOpen;
+    }
+
+    public void ToggleSideBar()
+    {
+        _isSideBarOpen = !_isSideBarOpen;
+        ApplySideBarLayout();
+        ResizeForCurrentView();
     }
 
     private void OnUsageChanged(object? sender, EventArgs args)
@@ -707,9 +982,46 @@ public sealed partial class MainWindow : Window
         presenter.Maximize();
     }
 
-    private void SettingsButton_Click(object sender, RoutedEventArgs args) => ShowSettingsView();
+    private void HomeButton_Click(object sender, RoutedEventArgs args) => ShowHudView();
 
-    private void CancelSettingsButton_Click(object sender, RoutedEventArgs args) => ShowHudView();
+    private void TitleText_PointerPressed(object sender, PointerRoutedEventArgs args)
+    {
+        ToggleSideBar();
+        args.Handled = true;
+    }
+
+    private void CreditsButton_Click(object sender, RoutedEventArgs args)
+    {
+        if (CreditsView.Visibility == Visibility.Visible)
+        {
+            ShowHudView();
+            return;
+        }
+
+        ShowCreditsView();
+    }
+
+    private void SettingsButton_Click(object sender, RoutedEventArgs args)
+    {
+        if (SettingsView.Visibility == Visibility.Visible)
+        {
+            ShowHudView();
+            return;
+        }
+
+        ShowSettingsView();
+    }
+
+    private void ResetCreditDetailsButton_Click(object sender, RoutedEventArgs args)
+    {
+        if (ResetCreditDetailsView.Visibility == Visibility.Visible)
+        {
+            ShowHudView();
+            return;
+        }
+
+        ShowResetCreditDetailsView();
+    }
 
     private void SaveSettingsButton_Click(object sender, RoutedEventArgs args)
     {
@@ -722,6 +1034,9 @@ public sealed partial class MainWindow : Window
             config.Hotkeys.ToggleWindow = HotkeyShortcut.NormalizeOrDefault(
                 ToggleHotkeyTextBox.Text,
                 WindexBarConfig.DefaultToggleWindowHotkey);
+            config.Hotkeys.ToggleSidebar = HotkeyShortcut.NormalizeOrDefault(
+                ToggleSidebarHotkeyTextBox.Text,
+                WindexBarConfig.DefaultToggleSidebarHotkey);
             config.StartWithWindows = StartWithWindowsCheckBox.IsChecked == true;
         });
         StartupShortcutService.Apply(_settingsStore.Config.StartWithWindows);
@@ -771,18 +1086,21 @@ public sealed partial class MainWindow : Window
     {
         Title = SettingsView.Visibility == Visibility.Visible ? Text("WindexBar Settings", "WindexBar \uC124\uC815") : "WindexBar";
         ApplyWindowSectionLabels();
-        CreditsLabelText.Text = Text("Credits", "\uD06C\uB808\uB527");
-        ResetCreditsLabelText.Text = Text("Reset credits", "\uCD08\uAE30\uD654\uAD8C");
         AccountLabelText.Text = Text("Account", "\uACC4\uC815");
-        SettingsButton.Content = Text("Settings", "\uC124\uC815");
+        SetSideBarButtonText(HomeButton, "\u2302");
+        SetSideBarButtonText(CreditsButton, "$");
+        SetSideBarButtonText(SettingsButton, "\u2699");
+        SetSideBarButtonText(ResetCreditDetailsButton, "\u21BB");
         QuitButton.Content = Text("Quit", "\uC885\uB8CC");
+        CreditsTitleText.Text = Text("Credits", "\uD06C\uB808\uB527");
+        ResetCreditDetailsTitleText.Text = Text("Reset credit details", "\uCD08\uAE30\uD654\uAD8C \uC0C1\uC138");
         SettingsTitleText.Text = Text("Settings", "\uC124\uC815");
         RefreshIntervalLabelText.Text = Text("Refresh interval", "\uC0C8\uB85C\uACE0\uCE68 \uAC04\uACA9");
         SecondsLabelText.Text = Text("s", "\uCD08");
         LanguageLabelText.Text = Text("Language", "\uC5B8\uC5B4");
         ToggleHotkeyLabelText.Text = Text("Toggle shortcut", "\uD1A0\uAE00 \uB2E8\uCD95\uD0A4");
+        ToggleSidebarHotkeyLabelText.Text = Text("Sidebar shortcut", "\uC0AC\uC774\uB4DC\uBC14 \uB2E8\uCD95\uD0A4");
         StartWithWindowsCheckBox.Content = Text("Start with Windows", "Windows \uC2DC\uC791 \uC2DC \uC2E4\uD589");
-        CancelSettingsButton.Content = Text("Cancel", "\uCDE8\uC18C");
         SaveSettingsButton.Content = Text("Save", "\uC800\uC7A5");
     }
 
@@ -838,10 +1156,8 @@ public sealed partial class MainWindow : Window
         ApplyWindowSectionLabels();
         ApplyProgressBarTheme();
 
-        CreditsText.Text = credits is null
-            ? UnknownText
-            : IsKorean ? $"{credits.Remaining:0.##} \uB0A8\uC74C" : $"{credits.Remaining:0.##} remaining";
-        ResetCreditsText.Text = FormatRateLimitResetCredits(snapshot?.RateLimitResetCredits);
+        UpdateCredits(credits);
+        UpdateResetCreditDetails(snapshot?.RateLimitResetCredits);
         AccountText.Text = FormatIdentity(snapshot?.Identity);
         ErrorText.Text = string.IsNullOrWhiteSpace(_usageStore.LastError) ? string.Empty : _usageStore.LastError;
         var hudMeta = FormatHudMeta(snapshot, disabled);
@@ -1054,9 +1370,34 @@ public sealed partial class MainWindow : Window
         return IsKorean ? $"{window.UsedPercent:0.#}% \uC0AC\uC6A9{reset}" : $"Used {window.UsedPercent:0.#}%{reset}";
     }
 
-    private string FormatRateLimitResetCredits(RateLimitResetCreditsSnapshot? resetCredits)
+    private void UpdateCredits(CreditsSnapshot? credits)
     {
-        return RateLimitResetCreditFormatter.Format(resetCredits, CurrentLanguage);
+        CreditsDetailText.Text = FormatCredits(credits);
+    }
+
+    private void UpdateResetCreditDetails(RateLimitResetCreditsSnapshot? resetCredits)
+    {
+        ResetCreditSummaryText.Text = string.Join(
+            Environment.NewLine,
+            RateLimitResetCreditFormatter.FormatSummary(resetCredits, CurrentLanguage),
+            "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
+        ResetCreditDetailsText.Text = RateLimitResetCreditFormatter.FormatDetail(resetCredits, CurrentLanguage);
+    }
+
+    private string FormatCredits(CreditsSnapshot? credits)
+    {
+        if (credits is null)
+        {
+            return UnknownText;
+        }
+
+        var balance = IsKorean
+            ? $"\ud83d\udcb0 {credits.Remaining:0.##}\uAC1C \uBCF4\uC720"
+            : $"\ud83d\udcb0 {credits.Remaining:0.##} held";
+        var updated = IsKorean
+            ? $"Updated: {credits.UpdatedAt:yyyy-MM-dd HH:mm}"
+            : $"Updated: {credits.UpdatedAt:yyyy-MM-dd HH:mm}";
+        return string.Join(Environment.NewLine, balance, updated);
     }
 
     private string FormatResetDescription(DateTimeOffset resetsAt)

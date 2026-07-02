@@ -11,6 +11,9 @@ namespace WindexBar.Windows;
 
 public sealed class TrayIconService : IDisposable
 {
+    private const int ToggleWindowHotkeyId = 0x5742;
+    private const int ToggleSidebarHotkeyId = 0x5743;
+
     private readonly SettingsStore _settingsStore;
     private readonly UsageStore _usageStore;
     private readonly DispatcherQueue _dispatcher;
@@ -37,8 +40,8 @@ public sealed class TrayIconService : IDisposable
         _notifyIcon.MouseClick += OnMouseClick;
         _notifyIcon.MouseDoubleClick += OnMouseDoubleClick;
         _notifyIcon.DoubleClick += OnDoubleClick;
-        _hotkeyService = new GlobalHotkeyService(() => _dispatcher.TryEnqueue(ToggleStatusWindow));
-        RegisterHotkey();
+        _hotkeyService = new GlobalHotkeyService();
+        RegisterHotkeys();
         _usageStore.Changed += OnUsageChanged;
         _settingsStore.Changed += OnSettingsChanged;
         UpdateTooltip();
@@ -186,22 +189,42 @@ public sealed class TrayIconService : IDisposable
     {
         _dispatcher.TryEnqueue(() =>
         {
-            RegisterHotkey();
+            RegisterHotkeys();
             RebuildMenu();
             UpdateTooltip();
         });
     }
 
-    private void RegisterHotkey()
+    private void RegisterHotkeys()
     {
-        var shortcut = _settingsStore.Config.Hotkeys.ToggleWindow;
-        if (_hotkeyService.Register(shortcut, out var error))
+        RegisterHotkey(ToggleWindowHotkeyId, _settingsStore.Config.Hotkeys.ToggleWindow, ToggleStatusWindow, "window");
+        RegisterHotkey(ToggleSidebarHotkeyId, _settingsStore.Config.Hotkeys.ToggleSidebar, ToggleSidebar, "sidebar");
+    }
+
+    private void RegisterHotkey(int id, string shortcut, Action action, string name)
+    {
+        if (_hotkeyService.Register(id, shortcut, () => _dispatcher.TryEnqueue(action.Invoke), out var error))
         {
-            LogMessage($"Registered WindexBar toggle hotkey: {shortcut}.");
+            LogMessage($"Registered WindexBar {name} hotkey: {shortcut}.");
             return;
         }
 
-        LogMessage($"Failed to register WindexBar toggle hotkey {shortcut}: {error}");
+        LogMessage($"Failed to register WindexBar {name} hotkey {shortcut}: {error}");
+    }
+
+    private void ToggleSidebar()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        TryShowWindow(window =>
+        {
+            window.ToggleSideBar();
+            var status = WindowCloseBehavior.Show(window);
+            LogMessage($"WindexBar sidebar toggled by hotkey for {status}.");
+        });
     }
 
     private void UpdateTooltip()

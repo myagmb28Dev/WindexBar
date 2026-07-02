@@ -345,6 +345,7 @@ public sealed class ConfigTests
         Assert.False(reloaded.ClickThroughHud);
         Assert.Equal(WindexBarConfig.DefaultLanguage, reloaded.Language);
         Assert.Equal(WindexBarConfig.DefaultToggleWindowHotkey, reloaded.Hotkeys.ToggleWindow);
+        Assert.Equal(WindexBarConfig.DefaultToggleSidebarHotkey, reloaded.Hotkeys.ToggleSidebar);
         Assert.True(reloaded.StartWithWindows);
     }
 
@@ -458,6 +459,29 @@ public sealed class ConfigTests
     }
 
     [Fact]
+    public void NormalizesSavedSidebarHotkey()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, """
+        {
+          "version": 1,
+          "hotkeys": {
+            "toggleSidebar": "alt + b"
+          },
+          "providers": [
+            { "id": "codex", "enabled": true, "source": "cli" }
+          ]
+        }
+        """);
+        var store = new WindexBarConfigStore(path);
+
+        var config = store.LoadOrCreateDefault();
+
+        Assert.Equal("Alt+B", config.Hotkeys.ToggleSidebar);
+    }
+
+    [Fact]
     public void InvalidToggleHotkeyFallsBackToDefault()
     {
         var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
@@ -478,6 +502,29 @@ public sealed class ConfigTests
         var config = store.LoadOrCreateDefault();
 
         Assert.Equal(WindexBarConfig.DefaultToggleWindowHotkey, config.Hotkeys.ToggleWindow);
+    }
+
+    [Fact]
+    public void InvalidSidebarHotkeyFallsBackToDefault()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, """
+        {
+          "version": 1,
+          "hotkeys": {
+            "toggleSidebar": "B"
+          },
+          "providers": [
+            { "id": "codex", "enabled": true, "source": "cli" }
+          ]
+        }
+        """);
+        var store = new WindexBarConfigStore(path);
+
+        var config = store.LoadOrCreateDefault();
+
+        Assert.Equal(WindexBarConfig.DefaultToggleSidebarHotkey, config.Hotkeys.ToggleSidebar);
     }
 }
 
@@ -576,6 +623,46 @@ public sealed class RateLimitResetCreditTrackerTests
     }
 
     [Fact]
+    public void DecreaseRemovesUnknownLegacyCreditBeforeEstimatedCredit()
+    {
+        var legacy = new RateLimitResetCreditObservation(
+            DateTimeOffset.Parse("2026-06-29T12:00:00+09:00"),
+            null);
+        var estimated = new RateLimitResetCreditObservation(
+            DateTimeOffset.Parse("2026-06-30T12:00:00+09:00"),
+            DateTimeOffset.Parse("2026-07-30T12:00:00+09:00"));
+        var state = new RateLimitResetCreditState
+        {
+            HasObserved = true,
+            Credits = new List<RateLimitResetCreditObservation> { legacy, estimated }
+        };
+
+        var updated = RateLimitResetCreditTracker.Update(state, 1, DateTimeOffset.Parse("2026-07-01T12:00:00+09:00"));
+
+        Assert.Equal(estimated, Assert.Single(updated.Credits));
+    }
+
+    [Fact]
+    public void RepairsSingleUnknownCreditFromPriorRemovalBugWhenStillInsideThirtyDayWindow()
+    {
+        var firstSeenAt = DateTimeOffset.Parse("2026-06-30T12:00:00+09:00");
+        var state = new RateLimitResetCreditState
+        {
+            Version = 1,
+            HasObserved = true,
+            Credits = new List<RateLimitResetCreditObservation>
+            {
+                new(firstSeenAt, null)
+            }
+        };
+
+        var updated = RateLimitResetCreditTracker.Update(state, 1, DateTimeOffset.Parse("2026-07-01T12:00:00+09:00"));
+        var credit = Assert.Single(updated.Credits);
+
+        Assert.Equal(firstSeenAt.AddDays(30), credit.EstimatedExpiresAt);
+    }
+
+    [Fact]
     public void SnapshotReportsNextEstimatedExpirationAndUnknownCount()
     {
         var now = DateTimeOffset.Parse("2026-06-30T12:00:00+09:00");
@@ -596,23 +683,38 @@ public sealed class RateLimitResetCreditTrackerTests
 public sealed class RateLimitResetCreditFormatterTests
 {
     [Fact]
-    public void FormatsEstimatedExpirationAndUnknownCredit()
+    public void FormatsResetCreditSummaryAndDetail()
     {
         var now = DateTimeOffset.Parse("2026-06-30T12:00:00+09:00");
         var snapshot = new RateLimitResetCreditsSnapshot(
-            2,
+            8,
             now,
             new List<RateLimitResetCreditObservation>
             {
                 new(now.AddDays(-1), null),
-                new(now, now.AddDays(30))
+                new(now, now.AddDays(29)),
+                new(now, now.AddDays(20)),
+                new(now, now.AddDays(19)),
+                new(now, now.AddDays(20)),
+                new(now.AddDays(-2), null),
+                new(now, now.AddDays(19)),
+                new(now, now.AddDays(20))
             });
 
         var text = RateLimitResetCreditFormatter.Format(snapshot, "en", now);
 
-        Assert.Contains("2 available", text, StringComparison.Ordinal);
-        Assert.Contains("next estimated expiry in 30d", text, StringComparison.Ordinal);
-        Assert.Contains("1 expiry unknown", text, StringComparison.Ordinal);
+        Assert.Equal("8\uAC1C \uBCF4\uC720" + Environment.NewLine + "\uCCAB \uB9CC\uB8CC D-19", RateLimitResetCreditFormatter.FormatSummary(snapshot, "ko", now));
+        Assert.Equal("8 held" + Environment.NewLine + "First expiry D-19", text);
+
+        var detail = RateLimitResetCreditFormatter.FormatDetail(snapshot, "ko", now);
+
+        Assert.Equal(
+            "19\uC77C \uD6C4 \uB9CC\uB8CC: 2\uAC1C" + Environment.NewLine +
+            "20\uC77C \uD6C4 \uB9CC\uB8CC: 3\uAC1C" + Environment.NewLine +
+            "29\uC77C \uD6C4 \uB9CC\uB8CC: 1\uAC1C" + Environment.NewLine +
+            "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500" + Environment.NewLine +
+            "\uAE30\uC874 \uCD08\uAE30\uD654\uAD8C: 2\uAC1C",
+            detail);
     }
 }
 

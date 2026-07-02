@@ -7,7 +7,6 @@ namespace WindexBar.Windows;
 
 internal sealed class GlobalHotkeyService : IDisposable
 {
-    private const int HotkeyId = 0x5742;
     private const int WindowHotkeyMessage = 0x0312;
     private const uint ModAlt = 0x0001;
     private const uint ModControl = 0x0002;
@@ -16,24 +15,26 @@ internal sealed class GlobalHotkeyService : IDisposable
     private const uint ModNoRepeat = 0x4000;
 
     private readonly HotkeyMessageWindow _window;
-    private bool _registered;
+    private readonly Dictionary<int, Action> _actions = [];
+    private readonly HashSet<int> _registeredIds = [];
     private bool _disposed;
 
-    public GlobalHotkeyService(Action onPressed)
+    public GlobalHotkeyService()
     {
-        _window = new HotkeyMessageWindow(() =>
+        _window = new HotkeyMessageWindow(id =>
         {
-            if (!_disposed)
+            if (!_disposed && _actions.TryGetValue(id, out var action))
             {
-                onPressed();
+                action();
             }
         });
     }
 
-    public bool Register(string shortcutText, out string? error)
+    public bool Register(int id, string shortcutText, Action onPressed, out string? error)
     {
         error = null;
-        Unregister();
+        Unregister(id);
+        _actions.Remove(id);
 
         if (!HotkeyShortcut.TryParse(shortcutText, out var shortcut) || shortcut is null)
         {
@@ -68,25 +69,34 @@ internal sealed class GlobalHotkeyService : IDisposable
             modifiers |= ModWin;
         }
 
-        if (!RegisterHotKey(_window.Handle, HotkeyId, modifiers, virtualKey))
+        if (!RegisterHotKey(_window.Handle, id, modifiers, virtualKey))
         {
             error = new Win32Exception(Marshal.GetLastWin32Error()).Message;
             return false;
         }
 
-        _registered = true;
+        _registeredIds.Add(id);
+        _actions[id] = onPressed;
         return true;
     }
 
-    public void Unregister()
+    public void Unregister(int id)
     {
-        if (!_registered)
+        if (!_registeredIds.Remove(id))
         {
             return;
         }
 
-        _ = UnregisterHotKey(_window.Handle, HotkeyId);
-        _registered = false;
+        _ = UnregisterHotKey(_window.Handle, id);
+        _actions.Remove(id);
+    }
+
+    public void UnregisterAll()
+    {
+        foreach (var id in _registeredIds.ToArray())
+        {
+            Unregister(id);
+        }
     }
 
     public void Dispose()
@@ -97,7 +107,7 @@ internal sealed class GlobalHotkeyService : IDisposable
         }
 
         _disposed = true;
-        Unregister();
+        UnregisterAll();
         _window.Dispose();
     }
 
@@ -151,9 +161,9 @@ internal sealed class GlobalHotkeyService : IDisposable
 
     private sealed class HotkeyMessageWindow : Forms.NativeWindow, IDisposable
     {
-        private readonly Action _onPressed;
+        private readonly Action<int> _onPressed;
 
-        public HotkeyMessageWindow(Action onPressed)
+        public HotkeyMessageWindow(Action<int> onPressed)
         {
             _onPressed = onPressed;
             CreateHandle(new Forms.CreateParams { Caption = "WindexBarHotkey" });
@@ -161,9 +171,9 @@ internal sealed class GlobalHotkeyService : IDisposable
 
         protected override void WndProc(ref Forms.Message message)
         {
-            if (message.Msg == WindowHotkeyMessage && message.WParam.ToInt32() == HotkeyId)
+            if (message.Msg == WindowHotkeyMessage)
             {
-                _onPressed();
+                _onPressed(message.WParam.ToInt32());
                 return;
             }
 

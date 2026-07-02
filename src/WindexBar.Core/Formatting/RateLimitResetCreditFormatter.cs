@@ -11,41 +11,81 @@ public static class RateLimitResetCreditFormatter
         string? language,
         DateTimeOffset? now = null)
     {
+        return FormatSummary(resetCredits, language, now);
+    }
+
+    public static string FormatSummary(
+        RateLimitResetCreditsSnapshot? resetCredits,
+        string? language,
+        DateTimeOffset? now = null)
+    {
         if (resetCredits is null)
         {
-            return Unknown(language);
+            return Unknown();
         }
 
         var isKorean = IsKorean(language);
-        var parts = new List<string>
-        {
-            isKorean
-                ? $"{resetCredits.AvailableCount:N0}\uAC1C \uB0A8\uC74C"
-                : $"{resetCredits.AvailableCount:N0} available"
-        };
-
+        var availableText = isKorean
+            ? $"{FormatCount(resetCredits.AvailableCount)}\uAC1C \uBCF4\uC720"
+            : $"{FormatCount(resetCredits.AvailableCount)} held";
         if (resetCredits.AvailableCount <= 0)
         {
-            return parts[0];
+            return availableText;
         }
 
         var referenceTime = now ?? DateTimeOffset.Now;
-        if (resetCredits.NextEstimatedExpiresAt is { } nextEstimatedExpiresAt)
+        var expiryText = resetCredits.NextEstimatedExpiresAt is { } nextEstimatedExpiresAt
+            ? isKorean
+                ? $"\uCCAB \uB9CC\uB8CC {FormatDayCode(nextEstimatedExpiresAt, referenceTime)}"
+                : $"First expiry {FormatDayCode(nextEstimatedExpiresAt, referenceTime)}"
+            : isKorean
+                ? "\uAE30\uC874 \uD06C\uB808\uB527\uB9CC \uBCF4\uC720"
+                : "Legacy credits only";
+
+        return string.Join(Environment.NewLine, availableText, expiryText);
+    }
+
+    public static string FormatDetail(
+        RateLimitResetCreditsSnapshot? resetCredits,
+        string? language,
+        DateTimeOffset? now = null)
+    {
+        var isKorean = IsKorean(language);
+        if (resetCredits is null)
         {
-            parts.Add(isKorean
-                ? $"\uB2E4\uC74C \uCD94\uC815 \uB9CC\uB8CC {FormatRelative(nextEstimatedExpiresAt, referenceTime, language)}"
-                : $"next estimated expiry {FormatRelative(nextEstimatedExpiresAt, referenceTime, language)}");
+            return Unknown();
         }
 
-        var unknownCount = resetCredits.UnknownExpirationCount;
-        if (unknownCount > 0)
+        var referenceTime = now ?? DateTimeOffset.Now;
+        var lines = new List<string>();
+
+        foreach (var group in resetCredits.Credits
+            .Where(credit => credit.EstimatedExpiresAt is not null)
+            .GroupBy(credit => credit.EstimatedExpiresAt!.Value)
+            .OrderBy(group => group.Key)
+            .Select(group => new
+            {
+                Label = FormatExpiryBucket(group.Key, referenceTime, language),
+                Count = group.LongCount()
+            }))
         {
-            parts.Add(isKorean
-                ? FormatUnknownKorean(unknownCount, resetCredits.AvailableCount)
-                : FormatUnknownEnglish(unknownCount, resetCredits.AvailableCount));
+            lines.Add(FormatDetailLine(group.Label, group.Count, language));
         }
 
-        return string.Join(", ", parts);
+        if (resetCredits.UnknownExpirationCount > 0)
+        {
+            if (lines.Count > 0)
+            {
+                lines.Add("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
+            }
+
+            var legacyLabel = isKorean ? "\uAE30\uC874 \uCD08\uAE30\uD654\uAD8C" : "Legacy reset credits";
+            lines.Add(FormatDetailLine(legacyLabel, resetCredits.UnknownExpirationCount, language));
+        }
+
+        return lines.Count == 0
+            ? (isKorean ? "\uBCF4\uC720 \uCD08\uAE30\uD654\uAD8C \uC5C6\uC74C" : "No reset credits held")
+            : string.Join(Environment.NewLine, lines);
     }
 
     public static string FormatCompact(
@@ -53,30 +93,7 @@ public static class RateLimitResetCreditFormatter
         string? language,
         DateTimeOffset? now = null)
     {
-        var isKorean = IsKorean(language);
-        var baseText = resetCredits.AvailableCount.ToString("N0", CultureInfo.InvariantCulture);
-        if (resetCredits.AvailableCount <= 0)
-        {
-            return baseText;
-        }
-
-        var referenceTime = now ?? DateTimeOffset.Now;
-        if (resetCredits.NextEstimatedExpiresAt is { } nextEstimatedExpiresAt)
-        {
-            var relative = FormatRelative(nextEstimatedExpiresAt, referenceTime, language);
-            return isKorean
-                ? $"{baseText}, \uB9CC\uB8CC ~{relative}"
-                : $"{baseText}, exp ~{relative}";
-        }
-
-        if (resetCredits.UnknownExpirationCount > 0)
-        {
-            return isKorean
-                ? $"{baseText}, \uB9CC\uB8CC ?"
-                : $"{baseText}, exp ?";
-        }
-
-        return baseText;
+        return Format(resetCredits, language, now);
     }
 
     public static string FormatRelative(DateTimeOffset target, DateTimeOffset now, string? language)
@@ -105,17 +122,58 @@ public static class RateLimitResetCreditFormatter
         return isKorean ? $"{minutes}\uBD84 \uD6C4" : $"in {minutes}m";
     }
 
-    private static string FormatUnknownEnglish(long unknownCount, long availableCount) =>
-        unknownCount >= availableCount
-            ? "expiry unknown"
-            : $"{unknownCount:N0} expiry unknown";
+    private static string FormatRelativeShort(DateTimeOffset target, DateTimeOffset now, string? language)
+    {
+        var isKorean = IsKorean(language);
+        var delta = target - now;
+        if (delta.TotalSeconds <= 0)
+        {
+            return isKorean ? "\uC9C0\uAE08" : "now";
+        }
 
-    private static string FormatUnknownKorean(long unknownCount, long availableCount) =>
-        unknownCount >= availableCount
-            ? "\uB9CC\uB8CC \uD655\uC778 \uBD88\uAC00"
-            : $"{unknownCount:N0}\uAC1C \uB9CC\uB8CC \uD655\uC778 \uBD88\uAC00";
+        if (delta.TotalHours >= 24)
+        {
+            var days = delta.TotalDays >= 10 ? Math.Round(delta.TotalDays) : Math.Round(delta.TotalDays, 1);
+            var daysText = days.ToString("0.#", CultureInfo.InvariantCulture);
+            return isKorean ? $"{daysText}\uC77C" : $"{daysText}d";
+        }
 
-    private static string Unknown(string? language) => IsKorean(language) ? "\uC54C \uC218 \uC5C6\uC74C" : "unknown";
+        if (delta.TotalHours >= 1)
+        {
+            var hours = Math.Max(1, (int)Math.Round(delta.TotalHours));
+            return isKorean ? $"{hours}\uC2DC\uAC04" : $"{hours}h";
+        }
+
+        var minutes = Math.Max(1, (int)Math.Round(delta.TotalMinutes));
+        return isKorean ? $"{minutes}\uBD84" : $"{minutes}m";
+    }
+
+    private static string FormatDayCode(DateTimeOffset target, DateTimeOffset now)
+    {
+        var days = Math.Max(0, (int)Math.Ceiling((target - now).TotalDays));
+        return days == 0 ? "D-Day" : $"D-{days}";
+    }
+
+    private static string FormatExpiryBucket(DateTimeOffset target, DateTimeOffset now, string? language)
+    {
+        var isKorean = IsKorean(language);
+        var days = Math.Max(0, (int)Math.Ceiling((target - now).TotalDays));
+        if (days == 0)
+        {
+            return isKorean ? "\uC624\uB298 \uB9CC\uB8CC" : "Expires today";
+        }
+
+        return isKorean ? $"{days}\uC77C \uD6C4 \uB9CC\uB8CC" : $"Expires in {days}d";
+    }
+
+    private static string CountSuffix(string? language) => IsKorean(language) ? "\uAC1C" : string.Empty;
+
+    private static string FormatDetailLine(string label, long count, string? language) =>
+        $"{label}: {FormatCount(count)}{CountSuffix(language)}";
+
+    private static string FormatCount(long value) => value.ToString("N0", CultureInfo.InvariantCulture);
+
+    private static string Unknown() => "?";
 
     private static bool IsKorean(string? language) => WindexBarConfig.NormalizeLanguage(language) == "ko";
 }
