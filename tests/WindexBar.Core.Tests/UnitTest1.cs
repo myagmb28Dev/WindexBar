@@ -1256,6 +1256,18 @@ public sealed class ReleaseWorkflowTests
         Assert.Contains("--notes-file", workflow, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void ReleaseWorkflowGroupsGeneratedNotesByChangeType()
+    {
+        var workflow = File.ReadAllText(FindRepositoryFile(Path.Combine(".github", "workflows", "release.yml")));
+
+        Assert.Contains("function Convert-ReleaseNotesSections", workflow, StringComparison.Ordinal);
+        Assert.Contains("Added:", workflow, StringComparison.Ordinal);
+        Assert.Contains("Hotfix:", workflow, StringComparison.Ordinal);
+        Assert.Contains("Get-ReleaseNoteSection", workflow, StringComparison.Ordinal);
+        Assert.Contains("Convert-ReleaseNotesSections $body", workflow, StringComparison.Ordinal);
+    }
+
     private static string FindRepositoryFile(string relativePath, [CallerFilePath] string sourceFilePath = "")
     {
         foreach (var start in new[] { Path.GetDirectoryName(sourceFilePath), Directory.GetCurrentDirectory(), AppContext.BaseDirectory })

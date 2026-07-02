@@ -133,10 +133,116 @@ jobs:
           $installer = '${{ steps.installer.outputs.path }}'
           $notesPath = Join-Path $env:RUNNER_TEMP 'release-notes.md'
 
+          function Get-ReleaseNoteSection {
+            param([string]$Item)
+
+            $title = $Item
+            if ($title -match '^(?<title>.+?)\s+by\s+@') {
+              $title = $Matches.title
+            }
+
+            $normalized = $title.ToLowerInvariant()
+            if ($normalized -match '^(fix|hotfix|repair|avoid|silence|resolve|restore)\b' -or
+                $normalized -match '\b(bug|crash|warning|blocked|failure|error)\b') {
+              return 'Hotfix:'
+            }
+
+            if ($normalized -match '^(add|adds|added|support|enable|introduce)\b') {
+              return 'Added:'
+            }
+
+            return 'Changed:'
+          }
+
+          function Add-ReleaseNoteSections {
+            param(
+              [System.Collections.Generic.List[string]]$Output,
+              [System.Collections.Specialized.OrderedDictionary]$Sections
+            )
+
+            $wroteSection = $false
+            foreach ($section in $Sections.Keys) {
+              $items = $Sections[$section]
+              if ($items.Count -eq 0) {
+                continue
+              }
+
+              if ($wroteSection) {
+                [void]$Output.Add('')
+                [void]$Output.Add('---')
+                [void]$Output.Add('')
+              } elseif ($Output.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($Output[$Output.Count - 1])) {
+                [void]$Output.Add('')
+              }
+
+              [void]$Output.Add($section)
+              foreach ($item in $items) {
+                [void]$Output.Add($item)
+              }
+
+              $wroteSection = $true
+            }
+          }
+
+          function Convert-ReleaseNotesSections {
+            param([string]$Body)
+
+            $lines = $Body -split '\r?\n'
+            $output = [System.Collections.Generic.List[string]]::new()
+            $sections = [ordered]@{
+              'Added:' = [System.Collections.Generic.List[string]]::new()
+              'Hotfix:' = [System.Collections.Generic.List[string]]::new()
+              'Changed:' = [System.Collections.Generic.List[string]]::new()
+            }
+            $insideChanges = $false
+
+            foreach ($line in $lines) {
+              if ($line -match '^##\s+What''s Changed\s*$') {
+                $insideChanges = $true
+                [void]$output.Add($line)
+                continue
+              }
+
+              if ($insideChanges) {
+                if ($line -match '^##\s+') {
+                  Add-ReleaseNoteSections -Output $output -Sections $sections
+                  $insideChanges = $false
+                  [void]$output.Add('')
+                  [void]$output.Add($line)
+                  continue
+                }
+
+                if ([string]::IsNullOrWhiteSpace($line)) {
+                  continue
+                }
+
+                if ($line -match '^\s*[-*]\s+(?<item>.+)$') {
+                  $item = $Matches.item.Trim()
+                  $section = Get-ReleaseNoteSection $item
+                  if ($section -eq 'Added:') {
+                    $item = ($item -replace '^(?i)(add|adds|added)\s+', '').Trim()
+                  }
+
+                  [void]$sections[$section].Add($item)
+                  continue
+                }
+              }
+
+              [void]$output.Add($line)
+            }
+
+            if ($insideChanges) {
+              Add-ReleaseNoteSections -Output $output -Sections $sections
+            }
+
+            return ($output -join [Environment]::NewLine).TrimEnd()
+          }
+
           $body = gh api "repos/$env:GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$tag" --jq .body
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           $body = $body -replace '(?ms)\r?\n*\*\*Full Changelog\*\*:.*$', ''
+          $body = Convert-ReleaseNotesSections $body
           $body = $body.TrimEnd()
           if ([string]::IsNullOrWhiteSpace($body)) {
             $body = "WindexBar $version"

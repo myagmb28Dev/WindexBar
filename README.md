@@ -8,16 +8,27 @@ WindexBar is a small Windows tray app for quickly checking Codex usage and statu
 - Current/session and weekly rate-limit windows, including reset countdowns when Codex exposes reset times.
 - Active Codex model and token usage, including context-window usage when available.
 - Banked rate-limit reset credit count and best-effort expiration estimates.
+- Reset credit detail view grouped by estimated expiration.
 - Remaining ChatGPT credits when Codex exposes the balance.
-- Settings for refresh interval, language, Windows startup, and the Alt+O show/hide shortcut.
+- Collapsible sidebar, toggled from the title or a shortcut.
+- Settings for refresh interval, language, Windows startup, Alt+O show/hide, and Alt+B sidebar shortcuts.
 
 Bank-reset expiration estimates are local best-effort estimates.
-They are calculated only for banked reset credits granted since v.1.2.
-Credits that existed prior to this update may show an unknown expiry.
+They are calculated for banked reset credits observed by WindexBar.
+Credits that existed before tracking began may show an unknown expiry.
 
 ## Install
 
 Download and run `WindexBarSetup.exe` from the GitHub Releases page.
+
+Source install:
+
+```powershell
+.\install.cmd
+```
+
+Source install launches WindexBar after installation by default.
+Use `.\install.cmd -NoLaunch` to install without launching, or `.\install.cmd -NoStartup` to skip the Windows startup shortcut.
 
 ## Requirements
 
@@ -56,7 +67,9 @@ Run the app, then WindexBar appears as an icon in the system tray.
 
 - Left click: open the status window
 - Right click: open Settings or Quit
+- Click the title: collapse or expand the sidebar
 - Alt+O: hide or show the WindexBar window
+- Alt+B: collapse or expand the sidebar
 
 ## Development
 
