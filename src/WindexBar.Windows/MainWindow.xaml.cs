@@ -18,7 +18,7 @@ namespace WindexBar.Windows;
 public sealed partial class MainWindow : Window
 {
     private const double HudClientWidth = 265;
-    private const double ContentClientHeight = 318;
+    private const double ContentClientHeight = 334;
     private const double SettingsClientWidth = HudClientWidth;
     private const double KeyboardScrollStep = 36;
     private const double SideBarCollapsedWidth = 6;
@@ -46,6 +46,7 @@ public sealed partial class MainWindow : Window
     private double _tokenBarValue;
     private double _targetTokenBarValue;
     private bool _isFastServiceTier;
+    private bool _isSideBarOpen = true;
     private Grid TitleBarDragRegion = null!;
     private Grid ContentRootGrid = null!;
     private Grid SideBarHost = null!;
@@ -92,6 +93,7 @@ public sealed partial class MainWindow : Window
     private TextBlock SecondsLabelText = null!;
     private TextBlock LanguageLabelText = null!;
     private TextBlock ToggleHotkeyLabelText = null!;
+    private TextBlock ToggleSidebarHotkeyLabelText = null!;
     private CheckBox StartWithWindowsCheckBox = null!;
     private Button SettingsButton = null!;
     private Button ResetCreditDetailsButton = null!;
@@ -99,6 +101,7 @@ public sealed partial class MainWindow : Window
     private Button SaveSettingsButton = null!;
     private TextBox RefreshIntervalSecondsTextBox = null!;
     private TextBox ToggleHotkeyTextBox = null!;
+    private TextBox ToggleSidebarHotkeyTextBox = null!;
     private ComboBox LanguageComboBox = null!;
     private Button HomeButton = null!;
     private Button CreditsButton = null!;
@@ -150,19 +153,25 @@ public sealed partial class MainWindow : Window
         RootLayout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
         var customTitleBar = new Grid { Background = Brush(0, 0, 0, 0) };
+        customTitleBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         customTitleBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         customTitleBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(60) });
         Grid.SetRow(customTitleBar, 0);
         RootLayout.Children.Add(customTitleBar);
 
-        TitleBarDragRegion = new Grid { Background = Brush(0, 0, 0, 0) };
-        TitleBarDragRegion.Children.Add(new TextBlock
+        var titleText = new TextBlock
         {
             Text = "WindexBar",
             Margin = new Thickness(10, 0, 0, 0),
+            Padding = new Thickness(0, 0, 12, 0),
             VerticalAlignment = VerticalAlignment.Center,
             Foreground = Brush(0xFF, 0xB9, 0xA7, 0xE8)
-        });
+        };
+        titleText.PointerPressed += TitleText_PointerPressed;
+        customTitleBar.Children.Add(titleText);
+
+        TitleBarDragRegion = new Grid { Background = Brush(0, 0, 0, 0) };
+        Grid.SetColumn(TitleBarDragRegion, 1);
         customTitleBar.Children.Add(TitleBarDragRegion);
 
         var windowButtons = new StackPanel
@@ -173,7 +182,7 @@ public sealed partial class MainWindow : Window
             Margin = new Thickness(0, 0, 12, 0),
             Spacing = 7
         };
-        Grid.SetColumn(windowButtons, 1);
+        Grid.SetColumn(windowButtons, 2);
         customTitleBar.Children.Add(windowButtons);
 
         windowButtons.Children.Add(CreateTitleButton(Brush(0xFF, 0xFF, 0xBD, 0x2E), MinimizeCircleButton_Click));
@@ -526,7 +535,7 @@ public sealed partial class MainWindow : Window
 
     private void BuildSettingsView()
     {
-        var grid = new Grid { RowSpacing = 11 };
+        var grid = new Grid { RowSpacing = 9 };
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -611,11 +620,31 @@ public sealed partial class MainWindow : Window
         Grid.SetColumn(ToggleHotkeyTextBox, 1);
         hotkeyGrid.Children.Add(ToggleHotkeyTextBox);
 
+        var sidebarHotkeyGrid = new Grid { ColumnSpacing = 8 };
+        sidebarHotkeyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        sidebarHotkeyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(124) });
+        Grid.SetRow(sidebarHotkeyGrid, 4);
+        grid.Children.Add(sidebarHotkeyGrid);
+
+        ToggleSidebarHotkeyLabelText = new TextBlock
+        {
+            Text = "Sidebar shortcut",
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        sidebarHotkeyGrid.Children.Add(ToggleSidebarHotkeyLabelText);
+        ToggleSidebarHotkeyTextBox = new TextBox
+        {
+            TextAlignment = TextAlignment.Right,
+            MinWidth = 124
+        };
+        Grid.SetColumn(ToggleSidebarHotkeyTextBox, 1);
+        sidebarHotkeyGrid.Children.Add(ToggleSidebarHotkeyTextBox);
+
         StartWithWindowsCheckBox = new CheckBox
         {
             Content = "Start with Windows"
         };
-        Grid.SetRow(StartWithWindowsCheckBox, 4);
+        Grid.SetRow(StartWithWindowsCheckBox, 5);
         grid.Children.Add(StartWithWindowsCheckBox);
 
         var buttons = new StackPanel
@@ -734,6 +763,7 @@ public sealed partial class MainWindow : Window
     {
         RefreshIntervalSecondsTextBox.Text = _settingsStore.Codex.RefreshIntervalSeconds.ToString();
         ToggleHotkeyTextBox.Text = _settingsStore.Config.Hotkeys.ToggleWindow;
+        ToggleSidebarHotkeyTextBox.Text = _settingsStore.Config.Hotkeys.ToggleSidebar;
         StartWithWindowsCheckBox.IsChecked = _settingsStore.Config.StartWithWindows;
         SelectLanguage(_settingsStore.Config.Language);
         HudView.Visibility = Visibility.Collapsed;
@@ -792,8 +822,9 @@ public sealed partial class MainWindow : Window
     {
         var scale = RootLayout.XamlRoot?.RasterizationScale ?? 1;
         var position = _windowPlacement.PositionForResize(new WindowPosition(AppWindow.Position.X, AppWindow.Position.Y));
+        var sideBarWidth = _isSideBarOpen ? SideBarOuterWidth : SideBarCollapsedWidth;
         AppWindow.ResizeClient(new SizeInt32(
-            (int)Math.Ceiling((width + SideBarOuterWidth - SideBarCollapsedWidth) * scale),
+            (int)Math.Ceiling((width + sideBarWidth - SideBarCollapsedWidth) * scale),
             (int)Math.Ceiling(height * scale)));
         AppWindow.Move(new PointInt32(position.X, position.Y));
     }
@@ -858,11 +889,18 @@ public sealed partial class MainWindow : Window
 
     private void ApplySideBarLayout()
     {
-        SideBarColumn.Width = new GridLength(SideBarExpandedWidth);
-        SideBarHost.Width = SideBarVisualWidth;
-        ContentRootGrid.ColumnSpacing = SideBarExpandedGap;
-        SideBarPanel.Opacity = 0.72;
-        SideBarPanel.IsHitTestVisible = true;
+        SideBarColumn.Width = new GridLength(_isSideBarOpen ? SideBarExpandedWidth : SideBarCollapsedWidth);
+        SideBarHost.Width = _isSideBarOpen ? SideBarVisualWidth : SideBarCollapsedWidth;
+        ContentRootGrid.ColumnSpacing = _isSideBarOpen ? SideBarExpandedGap : 0;
+        SideBarPanel.Opacity = _isSideBarOpen ? 0.72 : 0;
+        SideBarPanel.IsHitTestVisible = _isSideBarOpen;
+    }
+
+    public void ToggleSideBar()
+    {
+        _isSideBarOpen = !_isSideBarOpen;
+        ApplySideBarLayout();
+        ResizeForCurrentView();
     }
 
     private void OnUsageChanged(object? sender, EventArgs args)
@@ -946,6 +984,12 @@ public sealed partial class MainWindow : Window
 
     private void HomeButton_Click(object sender, RoutedEventArgs args) => ShowHudView();
 
+    private void TitleText_PointerPressed(object sender, PointerRoutedEventArgs args)
+    {
+        ToggleSideBar();
+        args.Handled = true;
+    }
+
     private void CreditsButton_Click(object sender, RoutedEventArgs args)
     {
         if (CreditsView.Visibility == Visibility.Visible)
@@ -990,6 +1034,9 @@ public sealed partial class MainWindow : Window
             config.Hotkeys.ToggleWindow = HotkeyShortcut.NormalizeOrDefault(
                 ToggleHotkeyTextBox.Text,
                 WindexBarConfig.DefaultToggleWindowHotkey);
+            config.Hotkeys.ToggleSidebar = HotkeyShortcut.NormalizeOrDefault(
+                ToggleSidebarHotkeyTextBox.Text,
+                WindexBarConfig.DefaultToggleSidebarHotkey);
             config.StartWithWindows = StartWithWindowsCheckBox.IsChecked == true;
         });
         StartupShortcutService.Apply(_settingsStore.Config.StartWithWindows);
@@ -1052,6 +1099,7 @@ public sealed partial class MainWindow : Window
         SecondsLabelText.Text = Text("s", "\uCD08");
         LanguageLabelText.Text = Text("Language", "\uC5B8\uC5B4");
         ToggleHotkeyLabelText.Text = Text("Toggle shortcut", "\uD1A0\uAE00 \uB2E8\uCD95\uD0A4");
+        ToggleSidebarHotkeyLabelText.Text = Text("Sidebar shortcut", "\uC0AC\uC774\uB4DC\uBC14 \uB2E8\uCD95\uD0A4");
         StartWithWindowsCheckBox.Content = Text("Start with Windows", "Windows \uC2DC\uC791 \uC2DC \uC2E4\uD589");
         SaveSettingsButton.Content = Text("Save", "\uC800\uC7A5");
     }

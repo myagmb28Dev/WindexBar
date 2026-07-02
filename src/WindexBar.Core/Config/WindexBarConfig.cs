@@ -11,6 +11,7 @@ public sealed class WindexBarConfig
     public const int MaxRefreshIntervalSeconds = 3600;
     public const string DefaultLanguage = "en";
     public const string DefaultToggleWindowHotkey = "Alt+O";
+    public const string DefaultToggleSidebarHotkey = "Alt+B";
     public const bool DefaultStartWithWindows = true;
 
     [JsonPropertyName("version")]
@@ -93,11 +94,17 @@ public sealed class HotkeyConfig
     [JsonPropertyName("toggleWindow")]
     public string ToggleWindow { get; set; } = WindexBarConfig.DefaultToggleWindowHotkey;
 
+    [JsonPropertyName("toggleSidebar")]
+    public string ToggleSidebar { get; set; } = WindexBarConfig.DefaultToggleSidebarHotkey;
+
     public HotkeyConfig Normalized()
     {
         ToggleWindow = HotkeyShortcut.NormalizeOrDefault(
             ToggleWindow,
             WindexBarConfig.DefaultToggleWindowHotkey);
+        ToggleSidebar = HotkeyShortcut.NormalizeOrDefault(
+            ToggleSidebar,
+            WindexBarConfig.DefaultToggleSidebarHotkey);
         return this;
     }
 }

@@ -345,6 +345,7 @@ public sealed class ConfigTests
         Assert.False(reloaded.ClickThroughHud);
         Assert.Equal(WindexBarConfig.DefaultLanguage, reloaded.Language);
         Assert.Equal(WindexBarConfig.DefaultToggleWindowHotkey, reloaded.Hotkeys.ToggleWindow);
+        Assert.Equal(WindexBarConfig.DefaultToggleSidebarHotkey, reloaded.Hotkeys.ToggleSidebar);
         Assert.True(reloaded.StartWithWindows);
     }
 
@@ -458,6 +459,29 @@ public sealed class ConfigTests
     }
 
     [Fact]
+    public void NormalizesSavedSidebarHotkey()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, """
+        {
+          "version": 1,
+          "hotkeys": {
+            "toggleSidebar": "alt + b"
+          },
+          "providers": [
+            { "id": "codex", "enabled": true, "source": "cli" }
+          ]
+        }
+        """);
+        var store = new WindexBarConfigStore(path);
+
+        var config = store.LoadOrCreateDefault();
+
+        Assert.Equal("Alt+B", config.Hotkeys.ToggleSidebar);
+    }
+
+    [Fact]
     public void InvalidToggleHotkeyFallsBackToDefault()
     {
         var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
@@ -478,6 +502,29 @@ public sealed class ConfigTests
         var config = store.LoadOrCreateDefault();
 
         Assert.Equal(WindexBarConfig.DefaultToggleWindowHotkey, config.Hotkeys.ToggleWindow);
+    }
+
+    [Fact]
+    public void InvalidSidebarHotkeyFallsBackToDefault()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, """
+        {
+          "version": 1,
+          "hotkeys": {
+            "toggleSidebar": "B"
+          },
+          "providers": [
+            { "id": "codex", "enabled": true, "source": "cli" }
+          ]
+        }
+        """);
+        var store = new WindexBarConfigStore(path);
+
+        var config = store.LoadOrCreateDefault();
+
+        Assert.Equal(WindexBarConfig.DefaultToggleSidebarHotkey, config.Hotkeys.ToggleSidebar);
     }
 }
 
