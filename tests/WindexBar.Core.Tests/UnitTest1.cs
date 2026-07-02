@@ -1269,6 +1269,7 @@ public sealed class ReleaseWorkflowTests
         Assert.Contains("$body = $generatedNotes -join [Environment]::NewLine", workflow, StringComparison.Ordinal);
         Assert.Contains("Convert-ReleaseNotesSections $body", workflow, StringComparison.Ordinal);
         Assert.Contains("\\b(hotfix|bug|crash|warning|blocked|failure|error)\\b", workflow, StringComparison.Ordinal);
+        Assert.Contains("[void]$Output.Add(\"- $item\")", workflow, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryFile(string relativePath, [CallerFilePath] string sourceFilePath = "")

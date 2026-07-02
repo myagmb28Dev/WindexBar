@@ -177,7 +177,7 @@ jobs:
 
               [void]$Output.Add($section)
               foreach ($item in $items) {
-                [void]$Output.Add($item)
+                [void]$Output.Add("- $item")
               }
 
               $wroteSection = $true
