@@ -1282,7 +1282,15 @@ public sealed class InstallerBuildScriptTests
         Assert.Contains("Press F5 to restart", watchScript, StringComparison.Ordinal);
         Assert.Contains("ConsoleKey]::F5", watchScript, StringComparison.Ordinal);
         Assert.DoesNotContain("Ctrl+C", watchScript, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("Restart-WindexBar\r\n    }", watchScript, StringComparison.Ordinal);
+        var changeDetectedStart = watchScript.IndexOf("if ($null -ne $event", StringComparison.Ordinal);
+        var pendingRestartGateStart = watchScript.IndexOf("if (-not $pendingRestart)", StringComparison.Ordinal);
+        Assert.True(changeDetectedStart >= 0);
+        Assert.True(pendingRestartGateStart > changeDetectedStart);
+        var changeDetectedBlock = watchScript[changeDetectedStart..pendingRestartGateStart];
+        Assert.DoesNotContain("Restart-WindexBar", changeDetectedBlock, StringComparison.Ordinal);
+        Assert.Matches(
+            new Regex(@"if \(-not \(Test-F5Pressed\)\)[\s\S]+Restart-WindexBar", RegexOptions.CultureInvariant),
+            watchScript);
         Assert.Contains("dotnet", watchScript, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("publish", watchScript, StringComparison.OrdinalIgnoreCase);
     }
