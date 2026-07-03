@@ -1173,6 +1173,15 @@ public sealed class UsageStoreTests
 public sealed class InstallerBuildScriptTests
 {
     [Fact]
+    public void SolutionDoesNotIncludeStandaloneCliProject()
+    {
+        var solution = File.ReadAllText(FindRepositoryFile("WindexBar.slnx"));
+
+        Assert.DoesNotContain("WindexBar.Cli", solution, StringComparison.OrdinalIgnoreCase);
+        Assert.False(Directory.Exists(FindRepositoryPath(Path.Combine("src", "WindexBar.Cli"))));
+    }
+
+    [Fact]
     public void PublishUsesSizeOptimizedReleaseOptions()
     {
         var script = File.ReadAllText(FindRepositoryFile("build-installer.cmd"));
@@ -1227,6 +1236,31 @@ public sealed class InstallerBuildScriptTests
         }
 
         throw new FileNotFoundException($"Could not find repository file `{fileName}`.");
+    }
+
+    private static string FindRepositoryPath(string relativePath, [CallerFilePath] string sourceFilePath = "")
+    {
+        foreach (var start in new[] { Path.GetDirectoryName(sourceFilePath), Directory.GetCurrentDirectory(), AppContext.BaseDirectory })
+        {
+            if (string.IsNullOrWhiteSpace(start))
+            {
+                continue;
+            }
+
+            var directory = new DirectoryInfo(start);
+            while (directory is not null)
+            {
+                var path = Path.Combine(directory.FullName, relativePath);
+                if (Directory.Exists(path) || File.Exists(path))
+                {
+                    return path;
+                }
+
+                directory = directory.Parent;
+            }
+        }
+
+        return Path.GetFullPath(relativePath);
     }
 }
 
