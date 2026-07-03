@@ -3,6 +3,7 @@ using WindexBar.Core.Config;
 using WindexBar.Core.Formatting;
 using WindexBar.Core.Models;
 using WindexBar.Core.Refresh;
+using WindexBar.Core.Windowing;
 using Microsoft.UI.Dispatching;
 using Drawing = System.Drawing;
 using Forms = System.Windows.Forms;
@@ -20,8 +21,10 @@ public sealed class TrayIconService : IDisposable
     private readonly Forms.NotifyIcon _notifyIcon;
     private readonly Drawing.Icon _defaultIcon;
     private readonly GlobalHotkeyService _hotkeyService;
+    private readonly ForegroundCodexActivityService _codexActivityService;
     private MainWindow? _statusWindow;
     private string? _uiError;
+    private bool _userHiddenByHotkey;
     private bool _disposed;
 
     public TrayIconService(SettingsStore settingsStore, UsageStore usageStore, DispatcherQueue dispatcher)
@@ -41,9 +44,12 @@ public sealed class TrayIconService : IDisposable
         _notifyIcon.MouseDoubleClick += OnMouseDoubleClick;
         _notifyIcon.DoubleClick += OnDoubleClick;
         _hotkeyService = new GlobalHotkeyService();
+        _codexActivityService = new ForegroundCodexActivityService();
+        _codexActivityService.ActivityChanged += OnCodexActivityChanged;
         RegisterHotkeys();
         _usageStore.Changed += OnUsageChanged;
         _settingsStore.Changed += OnSettingsChanged;
+        ApplyAutoVisibilityMonitoring();
         UpdateTooltip();
     }
 
@@ -55,6 +61,7 @@ public sealed class TrayIconService : IDisposable
         }
 
         LogMessage("ShowStatusWindow requested.");
+        _userHiddenByHotkey = false;
         TryShowWindow(window =>
         {
             window.ShowHudView();
@@ -71,6 +78,7 @@ public sealed class TrayIconService : IDisposable
         }
 
         LogMessage("ShowSettingsWindow requested.");
+        _userHiddenByHotkey = false;
         TryShowWindow(window =>
         {
             window.ShowSettingsView();
@@ -92,10 +100,12 @@ public sealed class TrayIconService : IDisposable
             if (WindowCloseBehavior.IsVisible(window))
             {
                 WindowCloseBehavior.Hide(window);
+                _userHiddenByHotkey = true;
                 LogMessage("WindexBar window hidden by hotkey.");
             }
             else
             {
+                _userHiddenByHotkey = false;
                 var status = WindowCloseBehavior.Show(window);
                 LogMessage($"WindexBar window shown by hotkey for {status}.");
             }
@@ -190,6 +200,7 @@ public sealed class TrayIconService : IDisposable
         _dispatcher.TryEnqueue(() =>
         {
             RegisterHotkeys();
+            ApplyAutoVisibilityMonitoring();
             RebuildMenu();
             UpdateTooltip();
         });
@@ -221,10 +232,58 @@ public sealed class TrayIconService : IDisposable
 
         TryShowWindow(window =>
         {
+            _userHiddenByHotkey = false;
             window.ToggleSideBar();
             var status = WindowCloseBehavior.Show(window);
             LogMessage($"WindexBar sidebar toggled by hotkey for {status}.");
         });
+    }
+
+    private void OnCodexActivityChanged(object? sender, bool isActive)
+    {
+        _dispatcher.TryEnqueue(() => ApplyAutoVisibility(isActive));
+    }
+
+    private void ApplyAutoVisibilityMonitoring()
+    {
+        if (_settingsStore.Config.AutoShowWithCodex)
+        {
+            _codexActivityService.Start();
+            ApplyAutoVisibility(_codexActivityService.IsActive);
+            return;
+        }
+
+        _codexActivityService.Stop();
+    }
+
+    private void ApplyAutoVisibility(bool isCodexActivity)
+    {
+        if (_disposed || !_settingsStore.Config.AutoShowWithCodex)
+        {
+            return;
+        }
+
+        var shouldShow = AutoVisibilityPolicy.ShouldShow(
+            _settingsStore.Config.AutoShowWithCodex,
+            isCodexActivity,
+            _userHiddenByHotkey);
+
+        if (shouldShow)
+        {
+            TryShowWindow(window =>
+            {
+                window.ShowHudView();
+                var status = WindowCloseBehavior.ShowPassive(window);
+                LogMessage($"WindexBar window auto-shown for {status}.");
+            });
+            return;
+        }
+
+        if (_statusWindow is not null && WindowCloseBehavior.IsVisible(_statusWindow))
+        {
+            WindowCloseBehavior.Hide(_statusWindow);
+            LogMessage("WindexBar window auto-hidden.");
+        }
     }
 
     private void UpdateTooltip()
@@ -363,6 +422,8 @@ public sealed class TrayIconService : IDisposable
         _disposed = true;
         _usageStore.Changed -= OnUsageChanged;
         _settingsStore.Changed -= OnSettingsChanged;
+        _codexActivityService.ActivityChanged -= OnCodexActivityChanged;
+        _codexActivityService.Dispose();
         _notifyIcon.MouseClick -= OnMouseClick;
         _notifyIcon.MouseDoubleClick -= OnMouseDoubleClick;
         _notifyIcon.DoubleClick -= OnDoubleClick;

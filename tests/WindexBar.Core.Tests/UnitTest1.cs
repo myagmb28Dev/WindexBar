@@ -347,6 +347,7 @@ public sealed class ConfigTests
         Assert.Equal(WindexBarConfig.DefaultToggleWindowHotkey, reloaded.Hotkeys.ToggleWindow);
         Assert.Equal(WindexBarConfig.DefaultToggleSidebarHotkey, reloaded.Hotkeys.ToggleSidebar);
         Assert.True(reloaded.StartWithWindows);
+        Assert.False(reloaded.AutoShowWithCodex);
     }
 
     [Fact]
@@ -398,6 +399,20 @@ public sealed class ConfigTests
         var reloaded = store.LoadOrCreateDefault();
 
         Assert.False(reloaded.StartWithWindows);
+    }
+
+    [Fact]
+    public void PreservesSavedAutoShowWithCodex()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
+        var store = new WindexBarConfigStore(path);
+        var config = store.LoadOrCreateDefault();
+        config.AutoShowWithCodex = true;
+        store.Save(config);
+
+        var reloaded = store.LoadOrCreateDefault();
+
+        Assert.True(reloaded.AutoShowWithCodex);
     }
 
     [Fact]
@@ -564,6 +579,54 @@ public sealed class TokenCountFormatterTests
     public void FormatsTokenCountsForLanguage(long tokens, string language, string expected)
     {
         Assert.Equal(expected, TokenCountFormatter.Format(tokens, language));
+    }
+}
+
+public sealed class CodexActivityWindowMatcherTests
+{
+    [Fact]
+    public void MatchesCodexDesktopProcess()
+    {
+        var window = new CodexActivityWindowSnapshot("Codex", "Codex", []);
+
+        Assert.True(CodexActivityWindowMatcher.IsCodexActivity(window));
+    }
+
+    [Fact]
+    public void MatchesTerminalWithCodexDescendant()
+    {
+        var window = new CodexActivityWindowSnapshot("WindowsTerminal", "PowerShell", ["pwsh", "codex"]);
+
+        Assert.True(CodexActivityWindowMatcher.IsCodexActivity(window));
+    }
+
+    [Fact]
+    public void MatchesTerminalTitleFallback()
+    {
+        var window = new CodexActivityWindowSnapshot("pwsh", "codex app-server", []);
+
+        Assert.True(CodexActivityWindowMatcher.IsCodexActivity(window));
+    }
+
+    [Fact]
+    public void DoesNotMatchBrowserTitleFallback()
+    {
+        var window = new CodexActivityWindowSnapshot("chrome", "Codex docs", []);
+
+        Assert.False(CodexActivityWindowMatcher.IsCodexActivity(window));
+    }
+}
+
+public sealed class AutoVisibilityPolicyTests
+{
+    [Theory]
+    [InlineData(false, true, false, false)]
+    [InlineData(true, false, false, false)]
+    [InlineData(true, true, true, false)]
+    [InlineData(true, true, false, true)]
+    public void OnlyShowsForEnabledCodexActivityWhenUserDidNotHide(bool enabled, bool codexActivity, bool userHidden, bool expected)
+    {
+        Assert.Equal(expected, AutoVisibilityPolicy.ShouldShow(enabled, codexActivity, userHidden));
     }
 }
 
@@ -1194,6 +1257,26 @@ public sealed class InstallerBuildScriptTests
     }
 
     [Fact]
+    public void RunCommandSupportsWatchRestartMode()
+    {
+        var runScript = File.ReadAllText(FindRepositoryFile("run.cmd"));
+        var watchScript = File.ReadAllText(FindRepositoryFile(Path.Combine("scripts", "run-watch.ps1")));
+
+        Assert.Contains("--watch", runScript, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("scripts\\run-watch.ps1", runScript, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("FileSystemWatcher", watchScript, StringComparison.Ordinal);
+        Assert.Contains("Restart-WindexBar", watchScript, StringComparison.Ordinal);
+        Assert.Contains("Stop-WindexBar", watchScript, StringComparison.Ordinal);
+        Assert.Contains("Test-F5Pressed", watchScript, StringComparison.Ordinal);
+        Assert.Contains("Press F5 to restart", watchScript, StringComparison.Ordinal);
+        Assert.Contains("ConsoleKey]::F5", watchScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("Ctrl+C", watchScript, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Restart-WindexBar\r\n    }", watchScript, StringComparison.Ordinal);
+        Assert.Contains("dotnet", watchScript, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("publish", watchScript, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void ConsoleInstallSilencesMissingCertificateWarningDuringOptionalSigning()
     {
         var installScript = File.ReadAllText(FindRepositoryFile(Path.Combine("scripts", "install-console.ps1")));
@@ -1211,6 +1294,55 @@ public sealed class InstallerBuildScriptTests
 
         Assert.DoesNotContain("Type.GetTypeFromCLSID", service, StringComparison.Ordinal);
         Assert.DoesNotContain("Activator.CreateInstance", service, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WindowsAppWiresAutoShowWithCodexSettingAndActivityService()
+    {
+        var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "MainWindow.xaml.cs")));
+        var trayService = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "TrayIconService.cs")));
+        var activityService = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "ForegroundCodexActivityService.cs")));
+
+        Assert.Contains("AutoShowWithCodexCheckBox", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("config.AutoShowWithCodex = AutoShowWithCodexCheckBox.IsChecked == true", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("ForegroundCodexActivityService", trayService, StringComparison.Ordinal);
+        Assert.Contains("AutoVisibilityPolicy.ShouldShow", trayService, StringComparison.Ordinal);
+        Assert.Contains("CodexActivityWindowMatcher.IsCodexActivity", activityService, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SettingsViewContentIsScrollable()
+    {
+        var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "MainWindow.xaml.cs")));
+
+        Assert.Contains("var settingsScrollViewer = new ScrollViewer", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("VerticalScrollBarVisibility = ScrollBarVisibility.Auto", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("SettingsView.Child = settingsRoot", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("settingsScrollViewer.Content = grid", mainWindow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HomeAndSettingsUseVisibleScrollableAreasWithFixedSettingsActions()
+    {
+        var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "MainWindow.xaml.cs")));
+
+        Assert.Contains("HudScrollViewer = new ScrollViewer", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("var settingsRoot = new Grid", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("Grid.SetRow(settingsScrollViewer, 0)", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("Grid.SetRow(buttons, 1)", mainWindow, StringComparison.Ordinal);
+        Assert.DoesNotContain("Grid.SetRow(buttons, 8)", mainWindow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HomeAndSettingsScrollBarsAreTransient()
+    {
+        var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "MainWindow.xaml.cs")));
+
+        Assert.Contains("AttachTransientScrollBar(HudScrollViewer)", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("AttachTransientScrollBar(settingsScrollViewer)", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("scrollViewer.VerticalScrollBarVisibility = ScrollBarVisibility.Hidden", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("scrollViewer.VerticalScrollBarVisibility = ScrollBarVisibility.Auto", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("scrollViewer.PointerReleased", mainWindow, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryFile(string fileName, [CallerFilePath] string sourceFilePath = "")

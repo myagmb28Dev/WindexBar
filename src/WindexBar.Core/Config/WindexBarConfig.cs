@@ -13,6 +13,7 @@ public sealed class WindexBarConfig
     public const string DefaultToggleWindowHotkey = "Alt+O";
     public const string DefaultToggleSidebarHotkey = "Alt+B";
     public const bool DefaultStartWithWindows = true;
+    public const bool DefaultAutoShowWithCodex = false;
 
     [JsonPropertyName("version")]
     public int Version { get; set; } = CurrentVersion;
@@ -25,6 +26,9 @@ public sealed class WindexBarConfig
 
     [JsonPropertyName("startWithWindows")]
     public bool StartWithWindows { get; set; } = DefaultStartWithWindows;
+
+    [JsonPropertyName("autoShowWithCodex")]
+    public bool AutoShowWithCodex { get; set; } = DefaultAutoShowWithCodex;
 
     [JsonPropertyName("language")]
     public string Language { get; set; } = DefaultLanguage;
