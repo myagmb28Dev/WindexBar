@@ -615,6 +615,17 @@ public sealed class CodexActivityWindowMatcherTests
 
         Assert.False(CodexActivityWindowMatcher.IsCodexActivity(window));
     }
+
+    [Theory]
+    [InlineData("WindexBar.Windows")]
+    [InlineData("WindexBar")]
+    public void IdentifiesOwnWindexBarWindow(string processName)
+    {
+        var window = new CodexActivityWindowSnapshot(processName, "WindexBar", []);
+
+        Assert.True(CodexActivityWindowMatcher.IsWindexBarWindow(window));
+        Assert.False(CodexActivityWindowMatcher.IsCodexActivity(window));
+    }
 }
 
 public sealed class AutoVisibilityPolicyTests
@@ -1308,6 +1319,22 @@ public sealed class InstallerBuildScriptTests
         Assert.Contains("ForegroundCodexActivityService", trayService, StringComparison.Ordinal);
         Assert.Contains("AutoVisibilityPolicy.ShouldShow", trayService, StringComparison.Ordinal);
         Assert.Contains("CodexActivityWindowMatcher.IsCodexActivity", activityService, StringComparison.Ordinal);
+        Assert.Contains("CodexActivityWindowMatcher.IsWindexBarWindow", activityService, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AutoShowModeDisablesWindowToggleShortcut()
+    {
+        var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "MainWindow.xaml.cs")));
+        var trayService = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "TrayIconService.cs")));
+
+        Assert.Contains("ApplyAutoShowShortcutState();", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("ToggleHotkeyTextBox.IsEnabled = !autoShowEnabled", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("ToggleHotkeyTextBox.Opacity = autoShowEnabled ? 0.45 : 1", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("if (!_settingsStore.Config.AutoShowWithCodex)", trayService, StringComparison.Ordinal);
+        Assert.Contains("RegisterHotkey(ToggleWindowHotkeyId", trayService, StringComparison.Ordinal);
+        Assert.Contains("_hotkeyService.Unregister(ToggleWindowHotkeyId)", trayService, StringComparison.Ordinal);
+        Assert.Contains("false);", trayService, StringComparison.Ordinal);
     }
 
     [Fact]

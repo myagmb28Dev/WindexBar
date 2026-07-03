@@ -24,7 +24,6 @@ public sealed class TrayIconService : IDisposable
     private readonly ForegroundCodexActivityService _codexActivityService;
     private MainWindow? _statusWindow;
     private string? _uiError;
-    private bool _userHiddenByHotkey;
     private bool _disposed;
 
     public TrayIconService(SettingsStore settingsStore, UsageStore usageStore, DispatcherQueue dispatcher)
@@ -61,7 +60,6 @@ public sealed class TrayIconService : IDisposable
         }
 
         LogMessage("ShowStatusWindow requested.");
-        _userHiddenByHotkey = false;
         TryShowWindow(window =>
         {
             window.ShowHudView();
@@ -78,7 +76,6 @@ public sealed class TrayIconService : IDisposable
         }
 
         LogMessage("ShowSettingsWindow requested.");
-        _userHiddenByHotkey = false;
         TryShowWindow(window =>
         {
             window.ShowSettingsView();
@@ -100,12 +97,10 @@ public sealed class TrayIconService : IDisposable
             if (WindowCloseBehavior.IsVisible(window))
             {
                 WindowCloseBehavior.Hide(window);
-                _userHiddenByHotkey = true;
                 LogMessage("WindexBar window hidden by hotkey.");
             }
             else
             {
-                _userHiddenByHotkey = false;
                 var status = WindowCloseBehavior.Show(window);
                 LogMessage($"WindexBar window shown by hotkey for {status}.");
             }
@@ -208,7 +203,16 @@ public sealed class TrayIconService : IDisposable
 
     private void RegisterHotkeys()
     {
-        RegisterHotkey(ToggleWindowHotkeyId, _settingsStore.Config.Hotkeys.ToggleWindow, ToggleStatusWindow, "window");
+        if (!_settingsStore.Config.AutoShowWithCodex)
+        {
+            RegisterHotkey(ToggleWindowHotkeyId, _settingsStore.Config.Hotkeys.ToggleWindow, ToggleStatusWindow, "window");
+        }
+        else
+        {
+            _hotkeyService.Unregister(ToggleWindowHotkeyId);
+            LogMessage("WindexBar window hotkey disabled while Codex auto-show is enabled.");
+        }
+
         RegisterHotkey(ToggleSidebarHotkeyId, _settingsStore.Config.Hotkeys.ToggleSidebar, ToggleSidebar, "sidebar");
     }
 
@@ -232,7 +236,6 @@ public sealed class TrayIconService : IDisposable
 
         TryShowWindow(window =>
         {
-            _userHiddenByHotkey = false;
             window.ToggleSideBar();
             var status = WindowCloseBehavior.Show(window);
             LogMessage($"WindexBar sidebar toggled by hotkey for {status}.");
@@ -266,7 +269,7 @@ public sealed class TrayIconService : IDisposable
         var shouldShow = AutoVisibilityPolicy.ShouldShow(
             _settingsStore.Config.AutoShowWithCodex,
             isCodexActivity,
-            _userHiddenByHotkey);
+            false);
 
         if (shouldShow)
         {

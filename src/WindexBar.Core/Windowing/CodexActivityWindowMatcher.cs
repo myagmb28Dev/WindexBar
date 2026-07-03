@@ -52,6 +52,13 @@ public static class CodexActivityWindowMatcher
         return window.WindowTitle?.Contains("codex", StringComparison.OrdinalIgnoreCase) == true;
     }
 
+    public static bool IsWindexBarWindow(CodexActivityWindowSnapshot? window)
+    {
+        var processName = NormalizeProcessName(window?.ProcessName);
+        return string.Equals(processName, "WindexBar.Windows", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(processName, "WindexBar", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool IsTerminalProcess(string? processName) =>
         processName is not null && TerminalProcessNames.Contains(processName);
 

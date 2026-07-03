@@ -50,7 +50,13 @@ internal sealed class ForegroundCodexActivityService : IDisposable
             return;
         }
 
-        SetActive(CodexActivityWindowMatcher.IsCodexActivity(ReadForegroundWindow()));
+        var foregroundWindow = ReadForegroundWindow();
+        if (CodexActivityWindowMatcher.IsWindexBarWindow(foregroundWindow))
+        {
+            return;
+        }
+
+        SetActive(CodexActivityWindowMatcher.IsCodexActivity(foregroundWindow));
     }
 
     private void SetActive(bool value)

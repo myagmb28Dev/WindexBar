@@ -702,6 +702,8 @@ public sealed partial class MainWindow : Window
         {
             Content = "Show only while using Codex"
         };
+        AutoShowWithCodexCheckBox.Checked += (_, _) => ApplyAutoShowShortcutState();
+        AutoShowWithCodexCheckBox.Unchecked += (_, _) => ApplyAutoShowShortcutState();
         Grid.SetRow(AutoShowWithCodexCheckBox, 6);
         grid.Children.Add(AutoShowWithCodexCheckBox);
 
@@ -824,6 +826,7 @@ public sealed partial class MainWindow : Window
         ToggleSidebarHotkeyTextBox.Text = _settingsStore.Config.Hotkeys.ToggleSidebar;
         StartWithWindowsCheckBox.IsChecked = _settingsStore.Config.StartWithWindows;
         AutoShowWithCodexCheckBox.IsChecked = _settingsStore.Config.AutoShowWithCodex;
+        ApplyAutoShowShortcutState();
         SelectLanguage(_settingsStore.Config.Language);
         HudView.Visibility = Visibility.Collapsed;
         CreditsView.Visibility = Visibility.Collapsed;
@@ -1102,6 +1105,14 @@ public sealed partial class MainWindow : Window
         StartupShortcutService.Apply(_settingsStore.Config.StartWithWindows);
         _usageStore.StartBackgroundRefresh();
         ShowHudView();
+    }
+
+    private void ApplyAutoShowShortcutState()
+    {
+        var autoShowEnabled = AutoShowWithCodexCheckBox.IsChecked == true;
+        ToggleHotkeyTextBox.IsEnabled = !autoShowEnabled;
+        ToggleHotkeyTextBox.Opacity = autoShowEnabled ? 0.45 : 1;
+        ToggleHotkeyLabelText.Opacity = autoShowEnabled ? 0.65 : 1;
     }
 
     private int ReadRefreshIntervalSeconds()
