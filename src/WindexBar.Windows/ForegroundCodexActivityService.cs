@@ -18,6 +18,7 @@ internal sealed class ForegroundCodexActivityService : IDisposable
     }
 
     public event EventHandler<bool>? ActivityChanged;
+    public event EventHandler<bool>? ActivitySampled;
 
     public bool IsActive => _isActive;
 
@@ -56,7 +57,9 @@ internal sealed class ForegroundCodexActivityService : IDisposable
             return;
         }
 
-        SetActive(CodexActivityWindowMatcher.IsCodexActivity(foregroundWindow));
+        var isActive = CodexActivityWindowMatcher.IsCodexActivity(foregroundWindow);
+        ActivitySampled?.Invoke(this, isActive);
+        SetActive(isActive);
     }
 
     private void SetActive(bool value)

@@ -136,12 +136,7 @@ jobs:
           function Get-ReleaseNoteSection {
             param([string]$Item)
 
-            $title = $Item
-            if ($title -match '^(?<title>.+?)\s+by\s+@') {
-              $title = $Matches.title
-            }
-
-            $normalized = $title.ToLowerInvariant()
+            $normalized = $Item.ToLowerInvariant()
             if ($normalized -match '^(fix|hotfix|repair|avoid|silence|resolve|restore)\b' -or
                 $normalized -match '\b(hotfix|bug|crash|warning|blocked|failure|error)\b') {
               return 'Hotfix:'
@@ -152,6 +147,12 @@ jobs:
             }
 
             return 'Changed:'
+          }
+
+          function Remove-ReleaseNoteAttribution {
+            param([string]$Item)
+
+            return ($Item -replace '\s+by\s+@[^\s]+\s+in\s+#\d+\s*$', '').Trim()
           }
 
           function Add-ReleaseNoteSections {
@@ -217,7 +218,7 @@ jobs:
                 }
 
                 if ($line -match '^\s*[-*]\s+(?<item>.+)$') {
-                  $item = $Matches.item.Trim()
+                  $item = Remove-ReleaseNoteAttribution $Matches.item.Trim()
                   $section = Get-ReleaseNoteSection $item
                   if ($section -eq 'Added:') {
                     $item = ($item -replace '^(?i)(add|adds|added)\s+', '').Trim()

@@ -639,6 +639,24 @@ public sealed class AutoVisibilityPolicyTests
     {
         Assert.Equal(expected, AutoVisibilityPolicy.ShouldShow(enabled, codexActivity, userHidden));
     }
+
+    [Fact]
+    public void KeepsWindowVisibleThroughOneTransientInactiveSample()
+    {
+        var filter = new AutoVisibilityStabilityFilter(inactiveSamplesBeforeHide: 2);
+
+        Assert.True(filter.ShouldTreatAsActive(true));
+        Assert.True(filter.ShouldTreatAsActive(false));
+        Assert.False(filter.ShouldTreatAsActive(false));
+    }
+
+    [Fact]
+    public void DoesNotTreatInitialInactiveStateAsActive()
+    {
+        var filter = new AutoVisibilityStabilityFilter(inactiveSamplesBeforeHide: 2);
+
+        Assert.False(filter.ShouldTreatAsActive(false));
+    }
 }
 
 public sealed class RateLimitResetCreditTrackerTests
@@ -1296,6 +1314,16 @@ public sealed class InstallerBuildScriptTests
     }
 
     [Fact]
+    public void ReleaseWorkflowRemovesGitHubGeneratedAttributionFromNotes()
+    {
+        var workflow = File.ReadAllText(FindRepositoryFile(Path.Combine(".github", "workflows", "release.yml")));
+
+        Assert.Contains("Remove-ReleaseNoteAttribution", workflow, StringComparison.Ordinal);
+        Assert.Contains("by\\s+@[^\\s]+\\s+in\\s+#\\d+", workflow, StringComparison.Ordinal);
+        Assert.Contains("$item = Remove-ReleaseNoteAttribution $Matches.item.Trim()", workflow, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ConsoleInstallSilencesMissingCertificateWarningDuringOptionalSigning()
     {
         var installScript = File.ReadAllText(FindRepositoryFile(Path.Combine("scripts", "install-console.ps1")));
@@ -1325,7 +1353,11 @@ public sealed class InstallerBuildScriptTests
         Assert.Contains("AutoShowWithCodexCheckBox", mainWindow, StringComparison.Ordinal);
         Assert.Contains("config.AutoShowWithCodex = AutoShowWithCodexCheckBox.IsChecked == true", mainWindow, StringComparison.Ordinal);
         Assert.Contains("ForegroundCodexActivityService", trayService, StringComparison.Ordinal);
+        Assert.Contains("ActivitySampled", trayService, StringComparison.Ordinal);
+        Assert.Contains("AutoVisibilityStabilityFilter", trayService, StringComparison.Ordinal);
+        Assert.Contains("ShouldTreatAsActive(isCodexActivity)", trayService, StringComparison.Ordinal);
         Assert.Contains("AutoVisibilityPolicy.ShouldShow", trayService, StringComparison.Ordinal);
+        Assert.Contains("ActivitySampled?.Invoke", activityService, StringComparison.Ordinal);
         Assert.Contains("CodexActivityWindowMatcher.IsCodexActivity", activityService, StringComparison.Ordinal);
         Assert.Contains("CodexActivityWindowMatcher.IsWindexBarWindow", activityService, StringComparison.Ordinal);
     }

@@ -14,6 +14,7 @@
 - Reset credit detail view grouped by estimated expiration.
 - Remaining ChatGPT credits when Codex exposes the balance.
 - Collapsible sidebar, toggled from the title or a shortcut.
+- Optional auto-show mode while Codex Desktop or a terminal Codex process is active.
 - Settings for refresh interval, language, Windows startup, Alt+O show/hide, and Alt+B sidebar shortcuts.
 
 Bank-reset expiration estimates are local best-effort estimates.
@@ -73,6 +74,7 @@ Run the app, then WindexBar appears as an icon in the system tray.
 - Click the title: collapse or expand the sidebar
 - Alt+O: hide or show the WindexBar window
 - Alt+B: collapse or expand the sidebar
+- Enable Codex auto-show in Settings to show WindexBar only while Codex Desktop or a terminal Codex process is active
 
 ## Development
 

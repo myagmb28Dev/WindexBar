@@ -22,6 +22,7 @@ public sealed class TrayIconService : IDisposable
     private readonly Drawing.Icon _defaultIcon;
     private readonly GlobalHotkeyService _hotkeyService;
     private readonly ForegroundCodexActivityService _codexActivityService;
+    private readonly AutoVisibilityStabilityFilter _autoVisibilityFilter = new(inactiveSamplesBeforeHide: 2);
     private MainWindow? _statusWindow;
     private string? _uiError;
     private bool _disposed;
@@ -44,7 +45,7 @@ public sealed class TrayIconService : IDisposable
         _notifyIcon.DoubleClick += OnDoubleClick;
         _hotkeyService = new GlobalHotkeyService();
         _codexActivityService = new ForegroundCodexActivityService();
-        _codexActivityService.ActivityChanged += OnCodexActivityChanged;
+        _codexActivityService.ActivitySampled += OnCodexActivitySampled;
         RegisterHotkeys();
         _usageStore.Changed += OnUsageChanged;
         _settingsStore.Changed += OnSettingsChanged;
@@ -260,7 +261,7 @@ public sealed class TrayIconService : IDisposable
         }
     }
 
-    private void OnCodexActivityChanged(object? sender, bool isActive)
+    private void OnCodexActivitySampled(object? sender, bool isActive)
     {
         _dispatcher.TryEnqueue(() => ApplyAutoVisibility(isActive));
     }
@@ -275,6 +276,7 @@ public sealed class TrayIconService : IDisposable
         }
 
         _codexActivityService.Stop();
+        _autoVisibilityFilter.Reset();
     }
 
     private void ApplyAutoVisibility(bool isCodexActivity)
@@ -284,9 +286,10 @@ public sealed class TrayIconService : IDisposable
             return;
         }
 
+        var stableCodexActivity = _autoVisibilityFilter.ShouldTreatAsActive(isCodexActivity);
         var shouldShow = AutoVisibilityPolicy.ShouldShow(
             _settingsStore.Config.AutoShowWithCodex,
-            isCodexActivity,
+            stableCodexActivity,
             false);
 
         if (shouldShow)
@@ -443,7 +446,7 @@ public sealed class TrayIconService : IDisposable
         _disposed = true;
         _usageStore.Changed -= OnUsageChanged;
         _settingsStore.Changed -= OnSettingsChanged;
-        _codexActivityService.ActivityChanged -= OnCodexActivityChanged;
+        _codexActivityService.ActivitySampled -= OnCodexActivitySampled;
         _codexActivityService.Dispose();
         _notifyIcon.MouseClick -= OnMouseClick;
         _notifyIcon.MouseDoubleClick -= OnMouseDoubleClick;
