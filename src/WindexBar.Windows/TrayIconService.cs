@@ -219,12 +219,30 @@ public sealed class TrayIconService : IDisposable
             return;
         }
 
-        TryShowWindow(window =>
+        try
         {
+            var window = _statusWindow;
+            if (window is null || !WindowCloseBehavior.IsVisible(window))
+            {
+                LogMessage("WindexBar sidebar hotkey ignored because the window is hidden.");
+                return;
+            }
+
             window.ToggleSideBar();
             var status = WindowCloseBehavior.Show(window);
             LogMessage($"WindexBar sidebar toggled by hotkey for {status}.");
-        });
+            _uiError = null;
+        }
+        catch (Exception error)
+        {
+            _statusWindow = null;
+            _uiError = error.Message;
+            LogMessage("Failed to toggle WindexBar sidebar by hotkey.", error);
+        }
+        finally
+        {
+            UpdateTooltip();
+        }
     }
 
     private void UpdateTooltip()
