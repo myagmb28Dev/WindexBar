@@ -1230,6 +1230,71 @@ public sealed class InstallerBuildScriptTests
     }
 }
 
+public sealed class TrayIconServiceTests
+{
+    [Fact]
+    public void SidebarHotkeyDoesNotShowHiddenWindow()
+    {
+        var service = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "TrayIconService.cs")));
+        var toggleSidebarBody = ExtractMethodBody(service, "private void ToggleSidebar()");
+
+        Assert.Contains("WindowCloseBehavior.IsVisible(window)", toggleSidebarBody, StringComparison.Ordinal);
+        Assert.Matches(
+            new Regex(
+                "WindowCloseBehavior\\.IsVisible\\(window\\).*window\\.ToggleSideBar\\(\\).*WindowCloseBehavior\\.Show\\(window\\)",
+                RegexOptions.Singleline),
+            toggleSidebarBody);
+    }
+
+    private static string ExtractMethodBody(string source, string signature)
+    {
+        var signatureIndex = source.IndexOf(signature, StringComparison.Ordinal);
+        Assert.True(signatureIndex >= 0, $"Could not find method signature: {signature}");
+
+        var bodyStart = source.IndexOf('{', signatureIndex);
+        Assert.True(bodyStart >= 0, $"Could not find method body for: {signature}");
+
+        var depth = 0;
+        for (var index = bodyStart; index < source.Length; index++)
+        {
+            if (source[index] == '{')
+            {
+                depth++;
+            }
+            else if (source[index] == '}')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return source[bodyStart..(index + 1)];
+                }
+            }
+        }
+
+        throw new InvalidOperationException($"Could not parse method body for: {signature}");
+    }
+
+    private static string FindRepositoryFile(string relativePath, [CallerFilePath] string sourceFilePath = "")
+    {
+        foreach (var start in new[] { Path.GetDirectoryName(sourceFilePath), Directory.GetCurrentDirectory(), AppContext.BaseDirectory })
+        {
+            var directory = start;
+            while (!string.IsNullOrWhiteSpace(directory))
+            {
+                var candidate = Path.Combine(directory, relativePath);
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+
+                directory = Directory.GetParent(directory)?.FullName;
+            }
+        }
+
+        throw new FileNotFoundException($"Could not find {relativePath} from {sourceFilePath}");
+    }
+}
+
 public sealed class ReleaseWorkflowTests
 {
     [Fact]
