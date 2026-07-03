@@ -3,6 +3,7 @@ using WindexBar.Core.Config;
 using WindexBar.Core.Formatting;
 using WindexBar.Core.Models;
 using WindexBar.Core.Refresh;
+using WindexBar.Core.Windowing;
 using Microsoft.UI.Dispatching;
 using Drawing = System.Drawing;
 using Forms = System.Windows.Forms;
@@ -20,6 +21,7 @@ public sealed class TrayIconService : IDisposable
     private readonly Forms.NotifyIcon _notifyIcon;
     private readonly Drawing.Icon _defaultIcon;
     private readonly GlobalHotkeyService _hotkeyService;
+    private readonly ForegroundCodexActivityService _codexActivityService;
     private MainWindow? _statusWindow;
     private string? _uiError;
     private bool _disposed;
@@ -41,9 +43,12 @@ public sealed class TrayIconService : IDisposable
         _notifyIcon.MouseDoubleClick += OnMouseDoubleClick;
         _notifyIcon.DoubleClick += OnDoubleClick;
         _hotkeyService = new GlobalHotkeyService();
+        _codexActivityService = new ForegroundCodexActivityService();
+        _codexActivityService.ActivityChanged += OnCodexActivityChanged;
         RegisterHotkeys();
         _usageStore.Changed += OnUsageChanged;
         _settingsStore.Changed += OnSettingsChanged;
+        ApplyAutoVisibilityMonitoring();
         UpdateTooltip();
     }
 
@@ -190,6 +195,7 @@ public sealed class TrayIconService : IDisposable
         _dispatcher.TryEnqueue(() =>
         {
             RegisterHotkeys();
+            ApplyAutoVisibilityMonitoring();
             RebuildMenu();
             UpdateTooltip();
         });
@@ -197,7 +203,16 @@ public sealed class TrayIconService : IDisposable
 
     private void RegisterHotkeys()
     {
-        RegisterHotkey(ToggleWindowHotkeyId, _settingsStore.Config.Hotkeys.ToggleWindow, ToggleStatusWindow, "window");
+        if (!_settingsStore.Config.AutoShowWithCodex)
+        {
+            RegisterHotkey(ToggleWindowHotkeyId, _settingsStore.Config.Hotkeys.ToggleWindow, ToggleStatusWindow, "window");
+        }
+        else
+        {
+            _hotkeyService.Unregister(ToggleWindowHotkeyId);
+            LogMessage("WindexBar window hotkey disabled while Codex auto-show is enabled.");
+        }
+
         RegisterHotkey(ToggleSidebarHotkeyId, _settingsStore.Config.Hotkeys.ToggleSidebar, ToggleSidebar, "sidebar");
     }
 
@@ -242,6 +257,53 @@ public sealed class TrayIconService : IDisposable
         finally
         {
             UpdateTooltip();
+        }
+    }
+
+    private void OnCodexActivityChanged(object? sender, bool isActive)
+    {
+        _dispatcher.TryEnqueue(() => ApplyAutoVisibility(isActive));
+    }
+
+    private void ApplyAutoVisibilityMonitoring()
+    {
+        if (_settingsStore.Config.AutoShowWithCodex)
+        {
+            _codexActivityService.Start();
+            ApplyAutoVisibility(_codexActivityService.IsActive);
+            return;
+        }
+
+        _codexActivityService.Stop();
+    }
+
+    private void ApplyAutoVisibility(bool isCodexActivity)
+    {
+        if (_disposed || !_settingsStore.Config.AutoShowWithCodex)
+        {
+            return;
+        }
+
+        var shouldShow = AutoVisibilityPolicy.ShouldShow(
+            _settingsStore.Config.AutoShowWithCodex,
+            isCodexActivity,
+            false);
+
+        if (shouldShow)
+        {
+            TryShowWindow(window =>
+            {
+                window.ShowHudView();
+                var status = WindowCloseBehavior.ShowPassive(window);
+                LogMessage($"WindexBar window auto-shown for {status}.");
+            });
+            return;
+        }
+
+        if (_statusWindow is not null && WindowCloseBehavior.IsVisible(_statusWindow))
+        {
+            WindowCloseBehavior.Hide(_statusWindow);
+            LogMessage("WindexBar window auto-hidden.");
         }
     }
 
@@ -381,6 +443,8 @@ public sealed class TrayIconService : IDisposable
         _disposed = true;
         _usageStore.Changed -= OnUsageChanged;
         _settingsStore.Changed -= OnSettingsChanged;
+        _codexActivityService.ActivityChanged -= OnCodexActivityChanged;
+        _codexActivityService.Dispose();
         _notifyIcon.MouseClick -= OnMouseClick;
         _notifyIcon.MouseDoubleClick -= OnMouseDoubleClick;
         _notifyIcon.DoubleClick -= OnDoubleClick;
