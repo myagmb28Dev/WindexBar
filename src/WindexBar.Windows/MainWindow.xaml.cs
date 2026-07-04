@@ -802,7 +802,6 @@ public sealed partial class MainWindow : Window
         ResetCreditDetailsView.Visibility = Visibility.Collapsed;
         HudView.Visibility = Visibility.Visible;
         ApplyLanguage();
-        ResizeForCurrentView();
         RootLayout.Focus(FocusState.Programmatic);
         UpdateState();
     }
@@ -814,7 +813,6 @@ public sealed partial class MainWindow : Window
         ResetCreditDetailsView.Visibility = Visibility.Collapsed;
         CreditsView.Visibility = Visibility.Visible;
         ApplyLanguage();
-        ResizeForCurrentView();
         RootLayout.Focus(FocusState.Programmatic);
         UpdateCredits(_usageStore.Credits);
     }
@@ -833,7 +831,6 @@ public sealed partial class MainWindow : Window
         ResetCreditDetailsView.Visibility = Visibility.Collapsed;
         SettingsView.Visibility = Visibility.Visible;
         ApplyLanguage();
-        ResizeForCurrentView();
         _modelUsages.Clear();
     }
 
@@ -844,7 +841,6 @@ public sealed partial class MainWindow : Window
         SettingsView.Visibility = Visibility.Collapsed;
         ResetCreditDetailsView.Visibility = Visibility.Visible;
         ApplyLanguage();
-        ResizeForCurrentView();
         RootLayout.Focus(FocusState.Programmatic);
         UpdateResetCreditDetails(_usageStore.Snapshot?.RateLimitResetCredits);
     }

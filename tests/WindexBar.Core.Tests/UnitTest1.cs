@@ -1412,6 +1412,18 @@ public sealed class InstallerBuildScriptTests
         Assert.Contains("scrollViewer.PointerReleased", mainWindow, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void SectionNavigationDoesNotResetUserWindowSize()
+    {
+        var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "MainWindow.xaml.cs")));
+
+        Assert.DoesNotContain("ResizeForCurrentView();", ExtractMethodBody(mainWindow, "public void ShowHudView()"), StringComparison.Ordinal);
+        Assert.DoesNotContain("ResizeForCurrentView();", ExtractMethodBody(mainWindow, "public void ShowCreditsView()"), StringComparison.Ordinal);
+        Assert.DoesNotContain("ResizeForCurrentView();", ExtractMethodBody(mainWindow, "public void ShowSettingsView()"), StringComparison.Ordinal);
+        Assert.DoesNotContain("ResizeForCurrentView();", ExtractMethodBody(mainWindow, "public void ShowResetCreditDetailsView()"), StringComparison.Ordinal);
+        Assert.Contains("ResizeForCurrentView();", ExtractMethodBody(mainWindow, "public void ToggleSideBar()"), StringComparison.Ordinal);
+    }
+
     private static string FindRepositoryFile(string fileName, [CallerFilePath] string sourceFilePath = "")
     {
         foreach (var start in new[] { Path.GetDirectoryName(sourceFilePath), Directory.GetCurrentDirectory(), AppContext.BaseDirectory })
@@ -1460,6 +1472,34 @@ public sealed class InstallerBuildScriptTests
         }
 
         return Path.GetFullPath(relativePath);
+    }
+
+    private static string ExtractMethodBody(string source, string signature)
+    {
+        var signatureIndex = source.IndexOf(signature, StringComparison.Ordinal);
+        Assert.True(signatureIndex >= 0, $"Could not find method signature: {signature}");
+
+        var bodyStart = source.IndexOf('{', signatureIndex);
+        Assert.True(bodyStart >= 0, $"Could not find method body for: {signature}");
+
+        var depth = 0;
+        for (var index = bodyStart; index < source.Length; index++)
+        {
+            if (source[index] == '{')
+            {
+                depth++;
+            }
+            else if (source[index] == '}')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return source[bodyStart..(index + 1)];
+                }
+            }
+        }
+
+        throw new InvalidOperationException($"Could not parse method body for {signature}.");
     }
 }
 
