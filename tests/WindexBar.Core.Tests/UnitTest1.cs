@@ -584,6 +584,16 @@ public sealed class TokenCountFormatterTests
 
 public sealed class CodexActivityWindowMatcherTests
 {
+    [Theory]
+    [InlineData("ChatGPT")]
+    [InlineData("ChatGPT.exe")]
+    public void MatchesChatGptDesktopProcess(string processName)
+    {
+        var window = new CodexActivityWindowSnapshot(processName, "ChatGPT", []);
+
+        Assert.True(CodexActivityWindowMatcher.IsCodexActivity(window));
+    }
+
     [Fact]
     public void MatchesCodexDesktopProcess()
     {
@@ -612,6 +622,14 @@ public sealed class CodexActivityWindowMatcherTests
     public void DoesNotMatchBrowserTitleFallback()
     {
         var window = new CodexActivityWindowSnapshot("chrome", "Codex docs", []);
+
+        Assert.False(CodexActivityWindowMatcher.IsCodexActivity(window));
+    }
+
+    [Fact]
+    public void DoesNotMatchChatGptBrowserTitleFallback()
+    {
+        var window = new CodexActivityWindowSnapshot("chrome", "ChatGPT", []);
 
         Assert.False(CodexActivityWindowMatcher.IsCodexActivity(window));
     }
