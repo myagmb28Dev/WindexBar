@@ -96,6 +96,33 @@ public sealed class RpcRateLimitResetCreditsSummary
 {
     [JsonPropertyName("availableCount")]
     public long AvailableCount { get; set; }
+
+    [JsonPropertyName("credits")]
+    public List<RpcRateLimitResetCredit>? Credits { get; set; }
+}
+
+public sealed class RpcRateLimitResetCredit
+{
+    [JsonPropertyName("id")]
+    public string? Id { get; set; }
+
+    [JsonPropertyName("grantedAt")]
+    public long? GrantedAt { get; set; }
+
+    [JsonPropertyName("expiresAt")]
+    public long? ExpiresAt { get; set; }
+
+    [JsonPropertyName("resetType")]
+    public string? ResetType { get; set; }
+
+    [JsonPropertyName("status")]
+    public string? Status { get; set; }
+
+    [JsonPropertyName("title")]
+    public string? Title { get; set; }
+
+    [JsonPropertyName("description")]
+    public string? Description { get; set; }
 }
 
 public sealed class RpcAccountResponse

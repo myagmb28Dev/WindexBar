@@ -27,7 +27,23 @@ public sealed class CodexRpcClientTests
                     credits = new { hasCredits = true, unlimited = false, balance = "123.5" },
                     planType = "plus"
                 },
-                rateLimitResetCredits = new { availableCount = 2 }
+                rateLimitResetCredits = new
+                {
+                    availableCount = 2,
+                    credits = new[]
+                    {
+                        new
+                        {
+                            id = "reset-1",
+                            grantedAt = 1_751_234_567L,
+                            expiresAt = 1_753_826_567L,
+                            resetType = "codexRateLimits",
+                            status = "available",
+                            title = "Referral reset",
+                            description = "Banked reset"
+                        }
+                    }
+                }
             }),
             OnRequest(3, new { account = new { type = "chatgpt", email = "me@example.com", planType = "team" } }));
 
@@ -44,6 +60,14 @@ public sealed class CodexRpcClientTests
         Assert.Equal("me@example.com", usage.Identity!.AccountEmail);
         Assert.Equal("team", usage.Identity.LoginMethod);
         Assert.Equal(2, usage.RateLimitResetCredits!.AvailableCount);
+        var resetCredit = Assert.Single(limits.RateLimitResetCredits!.Credits!);
+        Assert.Equal("reset-1", resetCredit.Id);
+        Assert.Equal(1_751_234_567L, resetCredit.GrantedAt);
+        Assert.Equal(1_753_826_567L, resetCredit.ExpiresAt);
+        Assert.Equal("codexRateLimits", resetCredit.ResetType);
+        Assert.Equal("available", resetCredit.Status);
+        Assert.Equal("Referral reset", resetCredit.Title);
+        Assert.Equal("Banked reset", resetCredit.Description);
         Assert.Equal(123.5, credits.Remaining, 3);
         Assert.Contains("initialized", transport.Writes[1], StringComparison.Ordinal);
     }
