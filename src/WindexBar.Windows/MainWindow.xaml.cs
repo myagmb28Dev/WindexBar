@@ -1168,7 +1168,7 @@ public sealed partial class MainWindow : Window
         ToggleHotkeyLabelText.Text = Text("Toggle shortcut", "\uD1A0\uAE00 \uB2E8\uCD95\uD0A4");
         ToggleSidebarHotkeyLabelText.Text = Text("Sidebar shortcut", "\uC0AC\uC774\uB4DC\uBC14 \uB2E8\uCD95\uD0A4");
         StartWithWindowsCheckBox.Content = Text("Start with Windows", "Windows \uC2DC\uC791 \uC2DC \uC2E4\uD589");
-        AutoShowWithCodexCheckBox.Content = Text("Show only while using Codex", "Codex \uC0AC\uC6A9 \uC911\uC5D0\uB9CC \uD45C\uC2DC");
+        AutoShowWithCodexCheckBox.Content = Text("Show only while using ChatGPT or Codex", "ChatGPT \uB610\uB294 Codex \uC0AC\uC6A9 \uC911\uC5D0\uB9CC \uD45C\uC2DC");
         SaveSettingsButton.Content = Text("Save", "\uC800\uC7A5");
     }
 

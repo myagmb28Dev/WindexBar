@@ -7,8 +7,9 @@ public sealed record CodexActivityWindowSnapshot(
 
 public static class CodexActivityWindowMatcher
 {
-    private static readonly HashSet<string> CodexProcessNames = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> CodexDesktopProcessNames = new(StringComparer.OrdinalIgnoreCase)
     {
+        "chatgpt",
         "codex",
         "codex desktop",
         "codex-desktop"
@@ -34,7 +35,7 @@ public static class CodexActivityWindowMatcher
         }
 
         var processName = NormalizeProcessName(window.ProcessName);
-        if (processName is not null && CodexProcessNames.Contains(processName))
+        if (processName is not null && CodexDesktopProcessNames.Contains(processName))
         {
             return true;
         }
