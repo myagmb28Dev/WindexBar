@@ -9,6 +9,10 @@ public static class CodexUsageMapper
     private static readonly string[] ModelContainerKeys = ["models", "modelLimits", "modelRateLimits", "rateLimitsByModel"];
     private static readonly string[] ReasoningSuffixes =
     [
+        " ultra reasoning effort",
+        " max reasoning effort",
+        " ultra reasoning",
+        " max reasoning",
         " extra high reasoning effort",
         " extra high reasoning",
         " xhigh reasoning effort",
@@ -24,6 +28,8 @@ public static class CodexUsageMapper
         " no reasoning",
         " none reasoning",
         " extra high",
+        " ultra",
+        " max",
         " xhigh",
         " high",
         " medium",
@@ -150,9 +156,68 @@ public static class CodexUsageMapper
         RpcRateLimitResetCreditsSummary? resetCredits,
         DateTimeOffset now)
     {
-        return resetCredits is null
-            ? null
-            : new RateLimitResetCreditsSnapshot(Math.Max(0, resetCredits.AvailableCount), now);
+        if (resetCredits is null)
+        {
+            return null;
+        }
+
+        var credits = (resetCredits.Credits ?? [])
+            .Select(MapRateLimitResetCredit)
+            .Where(credit => credit is not null)
+            .Cast<RateLimitResetCredit>()
+            .ToArray();
+
+        return new RateLimitResetCreditsSnapshot(
+            Math.Max(0, resetCredits.AvailableCount),
+            now,
+            credits);
+    }
+
+    private static RateLimitResetCredit? MapRateLimitResetCredit(RpcRateLimitResetCredit credit)
+    {
+        if (string.IsNullOrWhiteSpace(credit.Id)
+            || string.IsNullOrWhiteSpace(credit.ResetType)
+            || string.IsNullOrWhiteSpace(credit.Status)
+            || !TryMapUnixTime(credit.GrantedAt, out var grantedAt))
+        {
+            return null;
+        }
+
+        DateTimeOffset? expiresAt = null;
+        if (credit.ExpiresAt is { } expiresAtSeconds
+            && TryMapUnixTime(expiresAtSeconds, out var mappedExpiresAt))
+        {
+            expiresAt = mappedExpiresAt;
+        }
+
+        return new RateLimitResetCredit(
+            credit.Id,
+            grantedAt,
+            expiresAt,
+            credit.ResetType,
+            credit.Status,
+            credit.Title,
+            credit.Description);
+    }
+
+    private static bool TryMapUnixTime(long? seconds, out DateTimeOffset value)
+    {
+        try
+        {
+            if (seconds is null)
+            {
+                value = default;
+                return false;
+            }
+
+            value = DateTimeOffset.FromUnixTimeSeconds(seconds.Value);
+            return true;
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            value = default;
+            return false;
+        }
     }
 
     public static RateWindow? MapWindow(RpcRateLimitWindow? window)

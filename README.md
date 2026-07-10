@@ -9,17 +9,15 @@
 
 - System tray status for Codex usage, with a compact always-on-top window.
 - Current/session and weekly rate-limit windows, including reset countdowns when Codex exposes reset times.
-- Active Codex model and token usage, including context-window usage when available.
-- Banked rate-limit reset credit count and best-effort expiration estimates.
-- Reset credit detail view grouped by estimated expiration.
+- Active Codex model and reasoning effort (including Max and Ultra when exposed), plus token and context-window usage.
+- Banked rate-limit reset credit count with exact expiration details from Codex app-server when provided.
+- Reset-credit details grouped by exact expiration time, with unavailable expirations shown explicitly.
 - Remaining ChatGPT credits when Codex exposes the balance.
 - Collapsible sidebar, toggled from the title or a shortcut.
 - Optional auto-show mode while ChatGPT Desktop or a terminal Codex process is active.
 - Settings for refresh interval, language, Windows startup, Alt+O show/hide, and Alt+B sidebar shortcuts.
 
-Bank-reset expiration estimates are local best-effort estimates.
-They are calculated for banked reset credits observed by WindexBar.
-Credits that existed before tracking began may show an unknown expiry.
+Reset-credit expiration dates come directly from Codex app-server. If the installed Codex version or backend returns only the available count, WindexBar shows that expiration details are unavailable instead of estimating a date.
 
 ## Install
 
@@ -37,6 +35,7 @@ Use `.\install.cmd -NoLaunch` to install without launching, or `.\install.cmd -N
 ## Requirements
 
 - Codex CLI: WindexBar reads Codex usage through `codex app-server`, so the `codex` command must be available on `PATH`.
+- Keep Codex CLI up to date: whenever you update WindexBar to a new release, update Codex CLI to the latest version as well.
 - Install Codex CLI: [Codex CLI setup](https://developers.openai.com/codex/cli)
 
 Windows PowerShell:

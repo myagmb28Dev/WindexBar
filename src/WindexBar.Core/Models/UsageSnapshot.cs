@@ -1,5 +1,3 @@
-using System.Text.Json.Serialization;
-
 namespace WindexBar.Core.Models;
 
 public sealed record ProviderIdentitySnapshot(
@@ -56,26 +54,46 @@ public sealed record CreditsSnapshot(double Remaining, IReadOnlyList<CreditEvent
     public static CreditsSnapshot Empty(DateTimeOffset updatedAt) => new(0, Array.Empty<CreditEvent>(), updatedAt);
 }
 
-public sealed record RateLimitResetCreditObservation(DateTimeOffset FirstSeenAt, DateTimeOffset? EstimatedExpiresAt);
+public sealed record RateLimitResetCredit(
+    string Id,
+    DateTimeOffset GrantedAt,
+    DateTimeOffset? ExpiresAt,
+    string ResetType,
+    string Status,
+    string? Title,
+    string? Description);
 
 public sealed record RateLimitResetCreditsSnapshot(
     long AvailableCount,
     DateTimeOffset UpdatedAt,
-    IReadOnlyList<RateLimitResetCreditObservation>? Credits = null)
+    IReadOnlyList<RateLimitResetCredit>? Credits = null)
 {
-    public IReadOnlyList<RateLimitResetCreditObservation> Credits { get; init; } =
-        Credits ?? Array.Empty<RateLimitResetCreditObservation>();
+    public IReadOnlyList<RateLimitResetCredit> Credits { get; init; } =
+        NormalizeCredits(AvailableCount, Credits);
 
-    [JsonIgnore]
-    public long KnownExpirationCount => Credits.LongCount(credit => credit.EstimatedExpiresAt is not null);
+    public long UnavailableExpirationCount =>
+        Math.Max(0, AvailableCount - Credits.LongCount(credit => credit.ExpiresAt is not null));
 
-    [JsonIgnore]
-    public long UnknownExpirationCount => Math.Max(0, AvailableCount - KnownExpirationCount);
+    public DateTimeOffset? NextExpiresAt => Credits
+        .Select(credit => credit.ExpiresAt)
+        .Where(expiresAt => expiresAt is not null)
+        .Min();
 
-    [JsonIgnore]
-    public DateTimeOffset? NextEstimatedExpiresAt =>
-        Credits
-            .Select(credit => credit.EstimatedExpiresAt)
-            .Where(expiresAt => expiresAt is not null)
-            .Min();
+    private static IReadOnlyList<RateLimitResetCredit> NormalizeCredits(
+        long availableCount,
+        IReadOnlyList<RateLimitResetCredit>? credits)
+    {
+        var safeCount = availableCount <= 0
+            ? 0
+            : availableCount > int.MaxValue
+                ? int.MaxValue
+                : (int)availableCount;
+        return (credits ?? Array.Empty<RateLimitResetCredit>())
+            .OrderBy(credit => credit.ExpiresAt is null)
+            .ThenBy(credit => credit.ExpiresAt)
+            .ThenBy(credit => credit.GrantedAt)
+            .ThenBy(credit => credit.Id, StringComparer.Ordinal)
+            .Take(safeCount)
+            .ToArray();
+    }
 }
