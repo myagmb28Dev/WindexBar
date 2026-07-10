@@ -37,6 +37,7 @@ public sealed partial class MainWindow : Window
     private readonly WinUiDispatcherQueue _dispatcher;
     private readonly WindowPlacementController _windowPlacement = new(new WindowPosition(96, 96));
     private readonly DispatcherTimer _barAnimationTimer = new();
+    private readonly List<DispatcherTimer> _scrollBarHideTimers = [];
     private readonly List<ModelUsageView> _modelUsages = [];
     private double _barSweepPhase;
     private double _currentBarValue;
@@ -95,6 +96,7 @@ public sealed partial class MainWindow : Window
     private TextBlock ToggleHotkeyLabelText = null!;
     private TextBlock ToggleSidebarHotkeyLabelText = null!;
     private CheckBox StartWithWindowsCheckBox = null!;
+    private CheckBox AutoShowWithCodexCheckBox = null!;
     private Button SettingsButton = null!;
     private Button ResetCreditDetailsButton = null!;
     private Button QuitButton = null!;
@@ -140,6 +142,10 @@ public sealed partial class MainWindow : Window
             _usageStore.Changed -= OnUsageChanged;
             _settingsStore.Changed -= OnSettingsChanged;
             _barAnimationTimer.Stop();
+            foreach (var timer in _scrollBarHideTimers)
+            {
+                timer.Stop();
+            }
         };
 
         UpdateState();
@@ -252,6 +258,7 @@ public sealed partial class MainWindow : Window
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             VerticalScrollMode = ScrollMode.Auto
         };
+        AttachTransientScrollBar(HudScrollViewer);
         Grid.SetRow(HudScrollViewer, 0);
         hudGrid.Children.Add(HudScrollViewer);
 
@@ -533,8 +540,52 @@ public sealed partial class MainWindow : Window
         return value;
     }
 
+    private void AttachTransientScrollBar(ScrollViewer scrollViewer)
+    {
+        var hideTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(650) };
+        _scrollBarHideTimers.Add(hideTimer);
+
+        void Hide()
+        {
+            hideTimer.Stop();
+            scrollViewer.VerticalScrollBarVisibility = ScrollBarVisibility.Hidden;
+        }
+
+        void Show(bool autoHide)
+        {
+            scrollViewer.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+            hideTimer.Stop();
+            if (autoHide)
+            {
+                hideTimer.Start();
+            }
+        }
+
+        hideTimer.Tick += (_, _) => Hide();
+        scrollViewer.PointerPressed += (_, _) => Show(autoHide: false);
+        scrollViewer.PointerWheelChanged += (_, _) => Show(autoHide: true);
+        scrollViewer.ViewChanged += (_, _) => Show(autoHide: true);
+        scrollViewer.PointerReleased += (_, _) => hideTimer.Start();
+        scrollViewer.PointerCanceled += (_, _) => hideTimer.Start();
+        scrollViewer.PointerExited += (_, _) => hideTimer.Start();
+        scrollViewer.VerticalScrollBarVisibility = ScrollBarVisibility.Hidden;
+    }
+
     private void BuildSettingsView()
     {
+        var settingsRoot = new Grid { RowSpacing = 8 };
+        settingsRoot.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        settingsRoot.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        var settingsScrollViewer = new ScrollViewer
+        {
+            VerticalScrollBarVisibility = ScrollBarVisibility.Hidden,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+        };
+        AttachTransientScrollBar(settingsScrollViewer);
+        Grid.SetRow(settingsScrollViewer, 0);
+        settingsRoot.Children.Add(settingsScrollViewer);
+
         var grid = new Grid { RowSpacing = 9 };
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -542,9 +593,9 @@ public sealed partial class MainWindow : Window
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        SettingsView.Child = grid;
+        settingsScrollViewer.Content = grid;
+        SettingsView.Child = settingsRoot;
 
         SettingsTitleText = new TextBlock
         {
@@ -647,14 +698,23 @@ public sealed partial class MainWindow : Window
         Grid.SetRow(StartWithWindowsCheckBox, 5);
         grid.Children.Add(StartWithWindowsCheckBox);
 
+        AutoShowWithCodexCheckBox = new CheckBox
+        {
+            Content = "Show only while using Codex"
+        };
+        AutoShowWithCodexCheckBox.Checked += (_, _) => ApplyAutoShowShortcutState();
+        AutoShowWithCodexCheckBox.Unchecked += (_, _) => ApplyAutoShowShortcutState();
+        Grid.SetRow(AutoShowWithCodexCheckBox, 6);
+        grid.Children.Add(AutoShowWithCodexCheckBox);
+
         var buttons = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Right,
             Spacing = 6
         };
-        Grid.SetRow(buttons, 7);
-        grid.Children.Add(buttons);
+        Grid.SetRow(buttons, 1);
+        settingsRoot.Children.Add(buttons);
         SaveSettingsButton = CreateBackButton("Save");
         SaveSettingsButton.Click += SaveSettingsButton_Click;
         buttons.Children.Add(SaveSettingsButton);
@@ -742,7 +802,6 @@ public sealed partial class MainWindow : Window
         ResetCreditDetailsView.Visibility = Visibility.Collapsed;
         HudView.Visibility = Visibility.Visible;
         ApplyLanguage();
-        ResizeForCurrentView();
         RootLayout.Focus(FocusState.Programmatic);
         UpdateState();
     }
@@ -754,7 +813,6 @@ public sealed partial class MainWindow : Window
         ResetCreditDetailsView.Visibility = Visibility.Collapsed;
         CreditsView.Visibility = Visibility.Visible;
         ApplyLanguage();
-        ResizeForCurrentView();
         RootLayout.Focus(FocusState.Programmatic);
         UpdateCredits(_usageStore.Credits);
     }
@@ -765,13 +823,14 @@ public sealed partial class MainWindow : Window
         ToggleHotkeyTextBox.Text = _settingsStore.Config.Hotkeys.ToggleWindow;
         ToggleSidebarHotkeyTextBox.Text = _settingsStore.Config.Hotkeys.ToggleSidebar;
         StartWithWindowsCheckBox.IsChecked = _settingsStore.Config.StartWithWindows;
+        AutoShowWithCodexCheckBox.IsChecked = _settingsStore.Config.AutoShowWithCodex;
+        ApplyAutoShowShortcutState();
         SelectLanguage(_settingsStore.Config.Language);
         HudView.Visibility = Visibility.Collapsed;
         CreditsView.Visibility = Visibility.Collapsed;
         ResetCreditDetailsView.Visibility = Visibility.Collapsed;
         SettingsView.Visibility = Visibility.Visible;
         ApplyLanguage();
-        ResizeForCurrentView();
         _modelUsages.Clear();
     }
 
@@ -782,7 +841,6 @@ public sealed partial class MainWindow : Window
         SettingsView.Visibility = Visibility.Collapsed;
         ResetCreditDetailsView.Visibility = Visibility.Visible;
         ApplyLanguage();
-        ResizeForCurrentView();
         RootLayout.Focus(FocusState.Programmatic);
         UpdateResetCreditDetails(_usageStore.Snapshot?.RateLimitResetCredits);
     }
@@ -1038,10 +1096,19 @@ public sealed partial class MainWindow : Window
                 ToggleSidebarHotkeyTextBox.Text,
                 WindexBarConfig.DefaultToggleSidebarHotkey);
             config.StartWithWindows = StartWithWindowsCheckBox.IsChecked == true;
+            config.AutoShowWithCodex = AutoShowWithCodexCheckBox.IsChecked == true;
         });
         StartupShortcutService.Apply(_settingsStore.Config.StartWithWindows);
         _usageStore.StartBackgroundRefresh();
         ShowHudView();
+    }
+
+    private void ApplyAutoShowShortcutState()
+    {
+        var autoShowEnabled = AutoShowWithCodexCheckBox.IsChecked == true;
+        ToggleHotkeyTextBox.IsEnabled = !autoShowEnabled;
+        ToggleHotkeyTextBox.Opacity = autoShowEnabled ? 0.45 : 1;
+        ToggleHotkeyLabelText.Opacity = autoShowEnabled ? 0.65 : 1;
     }
 
     private int ReadRefreshIntervalSeconds()
@@ -1101,6 +1168,7 @@ public sealed partial class MainWindow : Window
         ToggleHotkeyLabelText.Text = Text("Toggle shortcut", "\uD1A0\uAE00 \uB2E8\uCD95\uD0A4");
         ToggleSidebarHotkeyLabelText.Text = Text("Sidebar shortcut", "\uC0AC\uC774\uB4DC\uBC14 \uB2E8\uCD95\uD0A4");
         StartWithWindowsCheckBox.Content = Text("Start with Windows", "Windows \uC2DC\uC791 \uC2DC \uC2E4\uD589");
+        AutoShowWithCodexCheckBox.Content = Text("Show only while using ChatGPT or Codex", "ChatGPT \uB610\uB294 Codex \uC0AC\uC6A9 \uC911\uC5D0\uB9CC \uD45C\uC2DC");
         SaveSettingsButton.Content = Text("Save", "\uC800\uC7A5");
     }
 

@@ -515,6 +515,7 @@ public sealed class ConfigTests
         Assert.Equal(WindexBarConfig.DefaultToggleWindowHotkey, reloaded.Hotkeys.ToggleWindow);
         Assert.Equal(WindexBarConfig.DefaultToggleSidebarHotkey, reloaded.Hotkeys.ToggleSidebar);
         Assert.True(reloaded.StartWithWindows);
+        Assert.False(reloaded.AutoShowWithCodex);
     }
 
     [Fact]
@@ -566,6 +567,20 @@ public sealed class ConfigTests
         var reloaded = store.LoadOrCreateDefault();
 
         Assert.False(reloaded.StartWithWindows);
+    }
+
+    [Fact]
+    public void PreservesSavedAutoShowWithCodex()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
+        var store = new WindexBarConfigStore(path);
+        var config = store.LoadOrCreateDefault();
+        config.AutoShowWithCodex = true;
+        store.Save(config);
+
+        var reloaded = store.LoadOrCreateDefault();
+
+        Assert.True(reloaded.AutoShowWithCodex);
     }
 
     [Fact]
@@ -732,6 +747,101 @@ public sealed class TokenCountFormatterTests
     public void FormatsTokenCountsForLanguage(long tokens, string language, string expected)
     {
         Assert.Equal(expected, TokenCountFormatter.Format(tokens, language));
+    }
+}
+
+public sealed class CodexActivityWindowMatcherTests
+{
+    [Theory]
+    [InlineData("ChatGPT")]
+    [InlineData("ChatGPT.exe")]
+    public void MatchesChatGptDesktopProcess(string processName)
+    {
+        var window = new CodexActivityWindowSnapshot(processName, "ChatGPT", []);
+
+        Assert.True(CodexActivityWindowMatcher.IsCodexActivity(window));
+    }
+
+    [Fact]
+    public void MatchesCodexDesktopProcess()
+    {
+        var window = new CodexActivityWindowSnapshot("Codex", "Codex", []);
+
+        Assert.True(CodexActivityWindowMatcher.IsCodexActivity(window));
+    }
+
+    [Fact]
+    public void MatchesTerminalWithCodexDescendant()
+    {
+        var window = new CodexActivityWindowSnapshot("WindowsTerminal", "PowerShell", ["pwsh", "codex"]);
+
+        Assert.True(CodexActivityWindowMatcher.IsCodexActivity(window));
+    }
+
+    [Fact]
+    public void MatchesTerminalTitleFallback()
+    {
+        var window = new CodexActivityWindowSnapshot("pwsh", "codex app-server", []);
+
+        Assert.True(CodexActivityWindowMatcher.IsCodexActivity(window));
+    }
+
+    [Fact]
+    public void DoesNotMatchBrowserTitleFallback()
+    {
+        var window = new CodexActivityWindowSnapshot("chrome", "Codex docs", []);
+
+        Assert.False(CodexActivityWindowMatcher.IsCodexActivity(window));
+    }
+
+    [Fact]
+    public void DoesNotMatchChatGptBrowserTitleFallback()
+    {
+        var window = new CodexActivityWindowSnapshot("chrome", "ChatGPT", []);
+
+        Assert.False(CodexActivityWindowMatcher.IsCodexActivity(window));
+    }
+
+    [Theory]
+    [InlineData("WindexBar.Windows")]
+    [InlineData("WindexBar")]
+    public void IdentifiesOwnWindexBarWindow(string processName)
+    {
+        var window = new CodexActivityWindowSnapshot(processName, "WindexBar", []);
+
+        Assert.True(CodexActivityWindowMatcher.IsWindexBarWindow(window));
+        Assert.False(CodexActivityWindowMatcher.IsCodexActivity(window));
+    }
+}
+
+public sealed class AutoVisibilityPolicyTests
+{
+    [Theory]
+    [InlineData(false, true, false, false)]
+    [InlineData(true, false, false, false)]
+    [InlineData(true, true, true, false)]
+    [InlineData(true, true, false, true)]
+    public void OnlyShowsForEnabledCodexActivityWhenUserDidNotHide(bool enabled, bool codexActivity, bool userHidden, bool expected)
+    {
+        Assert.Equal(expected, AutoVisibilityPolicy.ShouldShow(enabled, codexActivity, userHidden));
+    }
+
+    [Fact]
+    public void KeepsWindowVisibleThroughOneTransientInactiveSample()
+    {
+        var filter = new AutoVisibilityStabilityFilter(inactiveSamplesBeforeHide: 2);
+
+        Assert.True(filter.ShouldTreatAsActive(true));
+        Assert.True(filter.ShouldTreatAsActive(false));
+        Assert.False(filter.ShouldTreatAsActive(false));
+    }
+
+    [Fact]
+    public void DoesNotTreatInitialInactiveStateAsActive()
+    {
+        var filter = new AutoVisibilityStabilityFilter(inactiveSamplesBeforeHide: 2);
+
+        Assert.False(filter.ShouldTreatAsActive(false));
     }
 }
 
@@ -1305,6 +1415,15 @@ public sealed class UsageStoreTests
 public sealed class InstallerBuildScriptTests
 {
     [Fact]
+    public void SolutionDoesNotIncludeStandaloneCliProject()
+    {
+        var solution = File.ReadAllText(FindRepositoryFile("WindexBar.slnx"));
+
+        Assert.DoesNotContain("WindexBar.Cli", solution, StringComparison.OrdinalIgnoreCase);
+        Assert.False(Directory.Exists(FindRepositoryPath(Path.Combine("src", "WindexBar.Cli"))));
+    }
+
+    [Fact]
     public void PublishUsesSizeOptimizedReleaseOptions()
     {
         var script = File.ReadAllText(FindRepositoryFile("build-installer.cmd"));
@@ -1314,6 +1433,145 @@ public sealed class InstallerBuildScriptTests
         Assert.Contains("-p:DebugType=None", script, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("-p:DebugSymbols=false", script, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("-p:ILLinkTreatWarningsAsErrors=false", script, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void RunCommandSupportsWatchRestartMode()
+    {
+        var runScript = File.ReadAllText(FindRepositoryFile("run.cmd"));
+        var watchScript = File.ReadAllText(FindRepositoryFile(Path.Combine("scripts", "run-watch.ps1")));
+
+        Assert.Contains("--watch", runScript, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("scripts\\run-watch.ps1", runScript, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("FileSystemWatcher", watchScript, StringComparison.Ordinal);
+        Assert.Contains("Restart-WindexBar", watchScript, StringComparison.Ordinal);
+        Assert.Contains("Stop-WindexBar", watchScript, StringComparison.Ordinal);
+        Assert.Contains("Test-F5Pressed", watchScript, StringComparison.Ordinal);
+        Assert.Contains("Press F5 to restart", watchScript, StringComparison.Ordinal);
+        Assert.Contains("ConsoleKey]::F5", watchScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("Ctrl+C", watchScript, StringComparison.OrdinalIgnoreCase);
+        var changeDetectedStart = watchScript.IndexOf("if ($null -ne $event", StringComparison.Ordinal);
+        var pendingRestartGateStart = watchScript.IndexOf("if (-not $pendingRestart)", StringComparison.Ordinal);
+        Assert.True(changeDetectedStart >= 0);
+        Assert.True(pendingRestartGateStart > changeDetectedStart);
+        var changeDetectedBlock = watchScript[changeDetectedStart..pendingRestartGateStart];
+        Assert.DoesNotContain("Restart-WindexBar", changeDetectedBlock, StringComparison.Ordinal);
+        Assert.Matches(
+            new Regex(@"if \(-not \(Test-F5Pressed\)\)[\s\S]+Restart-WindexBar", RegexOptions.CultureInvariant),
+            watchScript);
+        Assert.Contains("dotnet", watchScript, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("publish", watchScript, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ReleaseWorkflowRemovesGitHubGeneratedAttributionFromNotes()
+    {
+        var workflow = File.ReadAllText(FindRepositoryFile(Path.Combine(".github", "workflows", "release.yml")));
+
+        Assert.Contains("Remove-ReleaseNoteAttribution", workflow, StringComparison.Ordinal);
+        Assert.Contains("by\\s+@[^\\s]+\\s+in\\s+#\\d+", workflow, StringComparison.Ordinal);
+        Assert.Contains("$item = Remove-ReleaseNoteAttribution $Matches.item.Trim()", workflow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ConsoleInstallSilencesMissingCertificateWarningDuringOptionalSigning()
+    {
+        var installScript = File.ReadAllText(FindRepositoryFile(Path.Combine("scripts", "install-console.ps1")));
+        var signScript = File.ReadAllText(FindRepositoryFile(Path.Combine("scripts", "sign-app.ps1")));
+
+        Assert.Contains("-QuietMissingCertificate", installScript, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[switch]$QuietMissingCertificate", signScript, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("if ($QuietMissingCertificate)", signScript, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void StartupShortcutCreationAvoidsReflectionActivatorForTrimmedPublish()
+    {
+        var service = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "StartupShortcutService.cs")));
+
+        Assert.DoesNotContain("Type.GetTypeFromCLSID", service, StringComparison.Ordinal);
+        Assert.DoesNotContain("Activator.CreateInstance", service, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WindowsAppWiresAutoShowWithCodexSettingAndActivityService()
+    {
+        var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "MainWindow.xaml.cs")));
+        var trayService = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "TrayIconService.cs")));
+        var activityService = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "ForegroundCodexActivityService.cs")));
+
+        Assert.Contains("AutoShowWithCodexCheckBox", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("config.AutoShowWithCodex = AutoShowWithCodexCheckBox.IsChecked == true", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("ForegroundCodexActivityService", trayService, StringComparison.Ordinal);
+        Assert.Contains("ActivitySampled", trayService, StringComparison.Ordinal);
+        Assert.Contains("AutoVisibilityStabilityFilter", trayService, StringComparison.Ordinal);
+        Assert.Contains("ShouldTreatAsActive(isCodexActivity)", trayService, StringComparison.Ordinal);
+        Assert.Contains("AutoVisibilityPolicy.ShouldShow", trayService, StringComparison.Ordinal);
+        Assert.Contains("ActivitySampled?.Invoke", activityService, StringComparison.Ordinal);
+        Assert.Contains("CodexActivityWindowMatcher.IsCodexActivity", activityService, StringComparison.Ordinal);
+        Assert.Contains("CodexActivityWindowMatcher.IsWindexBarWindow", activityService, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AutoShowModeDisablesWindowToggleShortcut()
+    {
+        var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "MainWindow.xaml.cs")));
+        var trayService = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "TrayIconService.cs")));
+
+        Assert.Contains("ApplyAutoShowShortcutState();", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("ToggleHotkeyTextBox.IsEnabled = !autoShowEnabled", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("ToggleHotkeyTextBox.Opacity = autoShowEnabled ? 0.45 : 1", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("if (!_settingsStore.Config.AutoShowWithCodex)", trayService, StringComparison.Ordinal);
+        Assert.Contains("RegisterHotkey(ToggleWindowHotkeyId", trayService, StringComparison.Ordinal);
+        Assert.Contains("_hotkeyService.Unregister(ToggleWindowHotkeyId)", trayService, StringComparison.Ordinal);
+        Assert.Contains("false);", trayService, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SettingsViewContentIsScrollable()
+    {
+        var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "MainWindow.xaml.cs")));
+
+        Assert.Contains("var settingsScrollViewer = new ScrollViewer", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("VerticalScrollBarVisibility = ScrollBarVisibility.Auto", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("SettingsView.Child = settingsRoot", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("settingsScrollViewer.Content = grid", mainWindow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HomeAndSettingsUseVisibleScrollableAreasWithFixedSettingsActions()
+    {
+        var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "MainWindow.xaml.cs")));
+
+        Assert.Contains("HudScrollViewer = new ScrollViewer", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("var settingsRoot = new Grid", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("Grid.SetRow(settingsScrollViewer, 0)", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("Grid.SetRow(buttons, 1)", mainWindow, StringComparison.Ordinal);
+        Assert.DoesNotContain("Grid.SetRow(buttons, 8)", mainWindow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HomeAndSettingsScrollBarsAreTransient()
+    {
+        var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "MainWindow.xaml.cs")));
+
+        Assert.Contains("AttachTransientScrollBar(HudScrollViewer)", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("AttachTransientScrollBar(settingsScrollViewer)", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("scrollViewer.VerticalScrollBarVisibility = ScrollBarVisibility.Hidden", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("scrollViewer.VerticalScrollBarVisibility = ScrollBarVisibility.Auto", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("scrollViewer.PointerReleased", mainWindow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SectionNavigationDoesNotResetUserWindowSize()
+    {
+        var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "MainWindow.xaml.cs")));
+
+        Assert.DoesNotContain("ResizeForCurrentView();", ExtractMethodBody(mainWindow, "public void ShowHudView()"), StringComparison.Ordinal);
+        Assert.DoesNotContain("ResizeForCurrentView();", ExtractMethodBody(mainWindow, "public void ShowCreditsView()"), StringComparison.Ordinal);
+        Assert.DoesNotContain("ResizeForCurrentView();", ExtractMethodBody(mainWindow, "public void ShowSettingsView()"), StringComparison.Ordinal);
+        Assert.DoesNotContain("ResizeForCurrentView();", ExtractMethodBody(mainWindow, "public void ShowResetCreditDetailsView()"), StringComparison.Ordinal);
+        Assert.Contains("ResizeForCurrentView();", ExtractMethodBody(mainWindow, "public void ToggleSideBar()"), StringComparison.Ordinal);
     }
 
     private static string FindRepositoryFile(string fileName, [CallerFilePath] string sourceFilePath = "")
@@ -1340,6 +1598,124 @@ public sealed class InstallerBuildScriptTests
 
         throw new FileNotFoundException($"Could not find repository file `{fileName}`.");
     }
+
+    private static string FindRepositoryPath(string relativePath, [CallerFilePath] string sourceFilePath = "")
+    {
+        foreach (var start in new[] { Path.GetDirectoryName(sourceFilePath), Directory.GetCurrentDirectory(), AppContext.BaseDirectory })
+        {
+            if (string.IsNullOrWhiteSpace(start))
+            {
+                continue;
+            }
+
+            var directory = new DirectoryInfo(start);
+            while (directory is not null)
+            {
+                var path = Path.Combine(directory.FullName, relativePath);
+                if (Directory.Exists(path) || File.Exists(path))
+                {
+                    return path;
+                }
+
+                directory = directory.Parent;
+            }
+        }
+
+        return Path.GetFullPath(relativePath);
+    }
+
+    private static string ExtractMethodBody(string source, string signature)
+    {
+        var signatureIndex = source.IndexOf(signature, StringComparison.Ordinal);
+        Assert.True(signatureIndex >= 0, $"Could not find method signature: {signature}");
+
+        var bodyStart = source.IndexOf('{', signatureIndex);
+        Assert.True(bodyStart >= 0, $"Could not find method body for: {signature}");
+
+        var depth = 0;
+        for (var index = bodyStart; index < source.Length; index++)
+        {
+            if (source[index] == '{')
+            {
+                depth++;
+            }
+            else if (source[index] == '}')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return source[bodyStart..(index + 1)];
+                }
+            }
+        }
+
+        throw new InvalidOperationException($"Could not parse method body for {signature}.");
+    }
+}
+
+public sealed class TrayIconServiceTests
+{
+    [Fact]
+    public void SidebarHotkeyDoesNotShowHiddenWindow()
+    {
+        var service = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "TrayIconService.cs")));
+        var toggleSidebarBody = ExtractMethodBody(service, "private void ToggleSidebar()");
+
+        Assert.Contains("WindowCloseBehavior.IsVisible(window)", toggleSidebarBody, StringComparison.Ordinal);
+        Assert.Matches(
+            new Regex(
+                "WindowCloseBehavior\\.IsVisible\\(window\\).*window\\.ToggleSideBar\\(\\).*WindowCloseBehavior\\.Show\\(window\\)",
+                RegexOptions.Singleline),
+            toggleSidebarBody);
+    }
+
+    private static string ExtractMethodBody(string source, string signature)
+    {
+        var signatureIndex = source.IndexOf(signature, StringComparison.Ordinal);
+        Assert.True(signatureIndex >= 0, $"Could not find method signature: {signature}");
+
+        var bodyStart = source.IndexOf('{', signatureIndex);
+        Assert.True(bodyStart >= 0, $"Could not find method body for: {signature}");
+
+        var depth = 0;
+        for (var index = bodyStart; index < source.Length; index++)
+        {
+            if (source[index] == '{')
+            {
+                depth++;
+            }
+            else if (source[index] == '}')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return source[bodyStart..(index + 1)];
+                }
+            }
+        }
+
+        throw new InvalidOperationException($"Could not parse method body for: {signature}");
+    }
+
+    private static string FindRepositoryFile(string relativePath, [CallerFilePath] string sourceFilePath = "")
+    {
+        foreach (var start in new[] { Path.GetDirectoryName(sourceFilePath), Directory.GetCurrentDirectory(), AppContext.BaseDirectory })
+        {
+            var directory = start;
+            while (!string.IsNullOrWhiteSpace(directory))
+            {
+                var candidate = Path.Combine(directory, relativePath);
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+
+                directory = Directory.GetParent(directory)?.FullName;
+            }
+        }
+
+        throw new FileNotFoundException($"Could not find {relativePath} from {sourceFilePath}");
+    }
 }
 
 public sealed class ReleaseWorkflowTests
@@ -1355,6 +1731,33 @@ public sealed class ReleaseWorkflowTests
         Assert.Matches(versionPattern, "1.1");
         Assert.Matches(versionPattern, "1.1.0");
         Assert.DoesNotMatch(versionPattern, "1");
+    }
+
+    [Fact]
+    public void ReleaseWorkflowRemovesGeneratedFullChangelogSection()
+    {
+        var workflow = File.ReadAllText(FindRepositoryFile(Path.Combine(".github", "workflows", "release.yml")));
+
+        Assert.DoesNotContain("--generate-notes", workflow, StringComparison.Ordinal);
+        Assert.Contains("releases/generate-notes", workflow, StringComparison.Ordinal);
+        Assert.Contains("Full Changelog", workflow, StringComparison.Ordinal);
+        Assert.Contains("--notes-file", workflow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReleaseWorkflowGroupsGeneratedNotesByChangeType()
+    {
+        var workflow = File.ReadAllText(FindRepositoryFile(Path.Combine(".github", "workflows", "release.yml")));
+
+        Assert.Contains("function Convert-ReleaseNotesSections", workflow, StringComparison.Ordinal);
+        Assert.Contains("Added:", workflow, StringComparison.Ordinal);
+        Assert.Contains("Hotfix:", workflow, StringComparison.Ordinal);
+        Assert.Contains("Get-ReleaseNoteSection", workflow, StringComparison.Ordinal);
+        Assert.Contains("$generatedNotes = @(gh api", workflow, StringComparison.Ordinal);
+        Assert.Contains("$body = $generatedNotes -join [Environment]::NewLine", workflow, StringComparison.Ordinal);
+        Assert.Contains("Convert-ReleaseNotesSections $body", workflow, StringComparison.Ordinal);
+        Assert.Contains("\\b(hotfix|bug|crash|warning|blocked|failure|error)\\b", workflow, StringComparison.Ordinal);
+        Assert.Contains("[void]$Output.Add(\"- $item\")", workflow, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryFile(string relativePath, [CallerFilePath] string sourceFilePath = "")

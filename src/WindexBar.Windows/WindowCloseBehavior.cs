@@ -8,6 +8,7 @@ namespace WindexBar.Windows;
 internal static class WindowCloseBehavior
 {
     private static readonly IntPtr HwndTopMost = new(-1);
+    private const uint SetWindowPosNoActivate = 0x0010;
 
     public static string Show(Window window)
     {
@@ -27,6 +28,21 @@ internal static class WindowCloseBehavior
         }
 
         return Describe(handle, showResult, positionResult, restoreResult, foregroundResult);
+    }
+
+    public static string ShowPassive(Window window)
+    {
+        var handle = WindowNative.GetWindowHandle(window);
+        var showResult = false;
+        var positionResult = false;
+        if (handle != IntPtr.Zero)
+        {
+            showResult = ShowWindow(handle, ShowWindowCommand.ShowNoActivate);
+            var plan = WindowActivationPlan.PreserveCurrentBounds;
+            positionResult = SetWindowPos(handle, HwndTopMost, plan.X, plan.Y, plan.Width, plan.Height, plan.Flags | SetWindowPosNoActivate);
+        }
+
+        return Describe(handle, showResult, positionResult, restoreResult: false, foregroundResult: false);
     }
 
     public static void Hide(Window window)
@@ -91,6 +107,7 @@ internal static class WindowCloseBehavior
     private enum ShowWindowCommand
     {
         Hide = 0,
+        ShowNoActivate = 4,
         Show = 5,
         Restore = 9
     }

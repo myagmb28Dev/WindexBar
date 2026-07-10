@@ -342,7 +342,7 @@ try {
                 Where-Object { $_.Name -like 'WindexBar*.exe' -or $_.Name -like 'WindexBar*.dll' }
         )
         if ($signTargets.Count -gt 0) {
-            & $SignScriptSource -Path $signTargets.FullName -WarnOnly
+            & $SignScriptSource -Path $signTargets.FullName -WarnOnly -QuietMissingCertificate
         }
     }
 

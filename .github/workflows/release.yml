@@ -131,15 +131,135 @@ jobs:
           $tag = '${{ steps.release.outputs.tag }}'
           $version = '${{ steps.release.outputs.version }}'
           $installer = '${{ steps.installer.outputs.path }}'
+          $notesPath = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+
+          function Get-ReleaseNoteSection {
+            param([string]$Item)
+
+            $normalized = $Item.ToLowerInvariant()
+            if ($normalized -match '^(fix|hotfix|repair|avoid|silence|resolve|restore)\b' -or
+                $normalized -match '\b(hotfix|bug|crash|warning|blocked|failure|error)\b') {
+              return 'Hotfix:'
+            }
+
+            if ($normalized -match '^(add|adds|added|support|enable|introduce)\b') {
+              return 'Added:'
+            }
+
+            return 'Changed:'
+          }
+
+          function Remove-ReleaseNoteAttribution {
+            param([string]$Item)
+
+            return ($Item -replace '\s+by\s+@[^\s]+\s+in\s+#\d+\s*$', '').Trim()
+          }
+
+          function Add-ReleaseNoteSections {
+            param(
+              [System.Collections.Generic.List[string]]$Output,
+              [System.Collections.Specialized.OrderedDictionary]$Sections
+            )
+
+            $wroteSection = $false
+            foreach ($section in $Sections.Keys) {
+              $items = $Sections[$section]
+              if ($items.Count -eq 0) {
+                continue
+              }
+
+              if ($wroteSection) {
+                [void]$Output.Add('')
+                [void]$Output.Add('---')
+                [void]$Output.Add('')
+              } elseif ($Output.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($Output[$Output.Count - 1])) {
+                [void]$Output.Add('')
+              }
+
+              [void]$Output.Add($section)
+              foreach ($item in $items) {
+                [void]$Output.Add("- $item")
+              }
+
+              $wroteSection = $true
+            }
+          }
+
+          function Convert-ReleaseNotesSections {
+            param([string]$Body)
+
+            $lines = $Body -split '\r?\n'
+            $output = [System.Collections.Generic.List[string]]::new()
+            $sections = [ordered]@{
+              'Added:' = [System.Collections.Generic.List[string]]::new()
+              'Hotfix:' = [System.Collections.Generic.List[string]]::new()
+              'Changed:' = [System.Collections.Generic.List[string]]::new()
+            }
+            $insideChanges = $false
+
+            foreach ($line in $lines) {
+              if ($line -match '^##\s+What''s Changed\s*$') {
+                $insideChanges = $true
+                [void]$output.Add($line)
+                continue
+              }
+
+              if ($insideChanges) {
+                if ($line -match '^##\s+') {
+                  Add-ReleaseNoteSections -Output $output -Sections $sections
+                  $insideChanges = $false
+                  [void]$output.Add('')
+                  [void]$output.Add($line)
+                  continue
+                }
+
+                if ([string]::IsNullOrWhiteSpace($line)) {
+                  continue
+                }
+
+                if ($line -match '^\s*[-*]\s+(?<item>.+)$') {
+                  $item = Remove-ReleaseNoteAttribution $Matches.item.Trim()
+                  $section = Get-ReleaseNoteSection $item
+                  if ($section -eq 'Added:') {
+                    $item = ($item -replace '^(?i)(add|adds|added)\s+', '').Trim()
+                  }
+
+                  [void]$sections[$section].Add($item)
+                  continue
+                }
+              }
+
+              [void]$output.Add($line)
+            }
+
+            if ($insideChanges) {
+              Add-ReleaseNoteSections -Output $output -Sections $sections
+            }
+
+            return ($output -join [Environment]::NewLine).TrimEnd()
+          }
+
+          $generatedNotes = @(gh api "repos/$env:GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$tag" --jq .body)
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $body = $generatedNotes -join [Environment]::NewLine
+
+          $body = $body -replace '(?ms)\r?\n*\*\*Full Changelog\*\*:.*$', ''
+          $body = Convert-ReleaseNotesSections $body
+          $body = $body.TrimEnd()
+          if ([string]::IsNullOrWhiteSpace($body)) {
+            $body = "WindexBar $version"
+          }
+
+          Set-Content -LiteralPath $notesPath -Value $body -NoNewline
 
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           $releaseExists = $LASTEXITCODE -eq 0
 
           if ($releaseExists) {
-            gh release edit $tag --repo $env:GITHUB_REPOSITORY --title "WindexBar $version" --draft=false
+            gh release edit $tag --repo $env:GITHUB_REPOSITORY --title "WindexBar $version" --notes-file "$notesPath" --draft=false
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           } else {
-            gh release create $tag --repo $env:GITHUB_REPOSITORY --verify-tag --title "WindexBar $version" --generate-notes
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --verify-tag --title "WindexBar $version" --notes-file "$notesPath"
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
