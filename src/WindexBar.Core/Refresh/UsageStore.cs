@@ -9,18 +9,15 @@ public sealed class UsageStore : IDisposable
 {
     private readonly SettingsStore _settings;
     private readonly ProviderDescriptor _codexDescriptor;
-    private readonly RateLimitResetCreditTracker _resetCreditTracker;
     private PeriodicTimer? _timer;
     private CancellationTokenSource? _loopCts;
 
     public UsageStore(
         SettingsStore settings,
-        ProviderDescriptor? codexDescriptor = null,
-        RateLimitResetCreditTracker? resetCreditTracker = null)
+        ProviderDescriptor? codexDescriptor = null)
     {
         _settings = settings;
         _codexDescriptor = codexDescriptor ?? CodexProviderDescriptor.Create();
-        _resetCreditTracker = resetCreditTracker ?? new RateLimitResetCreditTracker(new FileRateLimitResetCreditStateStore());
     }
 
     public UsageSnapshot? Snapshot { get; private set; }
@@ -63,7 +60,7 @@ public sealed class UsageStore : IDisposable
                 return;
             }
 
-            Snapshot = TrackResetCredits(outcome.Result.Usage);
+            Snapshot = outcome.Result.Usage;
             Credits = outcome.Result.Credits;
             LastSourceLabel = outcome.Result.SourceLabel;
             LastError = null;
@@ -110,18 +107,5 @@ public sealed class UsageStore : IDisposable
     private void OnChanged() => Changed?.Invoke(this, EventArgs.Empty);
 
     public void Dispose() => StopBackgroundRefresh();
-
-    private UsageSnapshot TrackResetCredits(UsageSnapshot usage)
-    {
-        if (usage.RateLimitResetCredits is null)
-        {
-            return usage;
-        }
-
-        return usage with
-        {
-            RateLimitResetCredits = _resetCreditTracker.Track(usage.RateLimitResetCredits)
-        };
-    }
 }
 

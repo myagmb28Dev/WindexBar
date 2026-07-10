@@ -5,6 +5,7 @@ using WindexBar.Core.Providers;
 using WindexBar.Core.Providers.Codex;
 using WindexBar.Core.Refresh;
 using WindexBar.Core.Windowing;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -115,21 +116,118 @@ public sealed class MappingTests
     }
 
     [Fact]
-    public void MapsRateLimitResetCredits()
+    public void MapsExactRateLimitResetCreditDetails()
     {
+        var grantedAt = 1_751_234_567L;
+        var expiresAt = 1_753_826_567L;
         var response = JsonSerializer.Deserialize<RpcRateLimitsResponse>(JsonSerializer.Serialize(new
         {
-            rateLimits = new
+            rateLimits = new { primary = new { usedPercent = 12.0 } },
+            rateLimitResetCredits = new
             {
-                primary = new { usedPercent = 12.0, windowDurationMins = 300, resetsAt = 1_800_000_000L }
-            },
-            rateLimitResetCredits = new { availableCount = 3L }
+                availableCount = 2L,
+                credits = new object[]
+                {
+                    new
+                    {
+                        id = "reset-1",
+                        grantedAt,
+                        expiresAt,
+                        resetType = "codexRateLimits",
+                        status = "available",
+                        title = "Referral reset",
+                        description = "Banked reset"
+                    },
+                    new
+                    {
+                        id = "reset-2",
+                        grantedAt,
+                        expiresAt = (long?)null,
+                        resetType = "codexRateLimits",
+                        status = "available",
+                        title = (string?)null,
+                        description = (string?)null
+                    }
+                }
+            }
         }))!;
 
-        var usage = CodexUsageMapper.MapUsage(response, null, DateTimeOffset.UnixEpoch)!;
+        var snapshot = CodexUsageMapper.MapUsage(response, null, DateTimeOffset.UnixEpoch)!.RateLimitResetCredits!;
 
-        Assert.Equal(3, usage.RateLimitResetCredits!.AvailableCount);
-        Assert.Equal(DateTimeOffset.UnixEpoch, usage.RateLimitResetCredits.UpdatedAt);
+        Assert.Equal(2, snapshot.AvailableCount);
+        Assert.Equal(2, snapshot.Credits.Count);
+        var exact = snapshot.Credits[0];
+        Assert.Equal("reset-1", exact.Id);
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(grantedAt), exact.GrantedAt);
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(expiresAt), exact.ExpiresAt);
+        Assert.Equal("codexRateLimits", exact.ResetType);
+        Assert.Equal("available", exact.Status);
+        Assert.Equal(1, snapshot.UnavailableExpirationCount);
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(expiresAt), snapshot.NextExpiresAt);
+    }
+
+    [Fact]
+    public void MissingOrInvalidResetCreditDetailsRemainUnavailable()
+    {
+        var response = new RpcRateLimitResetCreditsSummary
+        {
+            AvailableCount = 2,
+            Credits =
+            [
+                new RpcRateLimitResetCredit
+                {
+                    Id = "invalid",
+                    GrantedAt = long.MaxValue,
+                    ExpiresAt = 1_753_826_567L,
+                    ResetType = "codexRateLimits",
+                    Status = "available"
+                }
+            ]
+        };
+
+        var snapshot = CodexUsageMapper.MapRateLimitResetCredits(response, DateTimeOffset.UnixEpoch)!;
+
+        Assert.Empty(snapshot.Credits);
+        Assert.Equal(2, snapshot.UnavailableExpirationCount);
+        Assert.Null(snapshot.NextExpiresAt);
+    }
+
+    [Fact]
+    public void CapsResetCreditDetailsToAvailableCountUsingEarliestExpiration()
+    {
+        var grantedAt = 1_751_234_567L;
+        var earlierExpiry = 1_753_826_567L;
+        var laterExpiry = 1_753_900_000L;
+        var response = new RpcRateLimitResetCreditsSummary
+        {
+            AvailableCount = 1,
+            Credits =
+            [
+                new RpcRateLimitResetCredit
+                {
+                    Id = "later",
+                    GrantedAt = grantedAt,
+                    ExpiresAt = laterExpiry,
+                    ResetType = "codexRateLimits",
+                    Status = "available"
+                },
+                new RpcRateLimitResetCredit
+                {
+                    Id = "earlier",
+                    GrantedAt = grantedAt,
+                    ExpiresAt = earlierExpiry,
+                    ResetType = "codexRateLimits",
+                    Status = "available"
+                }
+            ]
+        };
+
+        var snapshot = CodexUsageMapper.MapRateLimitResetCredits(response, DateTimeOffset.UnixEpoch)!;
+
+        var credit = Assert.Single(snapshot.Credits);
+        Assert.Equal("earlier", credit.Id);
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(earlierExpiry), snapshot.NextExpiresAt);
+        Assert.Equal(0, snapshot.UnavailableExpirationCount);
     }
 
     [Fact]
@@ -299,6 +397,52 @@ public sealed class MappingTests
         Assert.Equal(22, usage.Models[0].Weekly!.UsedPercent);
         Assert.Equal("GPT-5.4 High", usage.Models[1].ModelName);
         Assert.Equal(30, usage.Models[1].Current!.UsedPercent);
+    }
+
+    [Fact]
+    public void GroupsGpt56MaxAndUltraReasoningBucketsByModelVersion()
+    {
+        var response = JsonSerializer.Deserialize<RpcRateLimitsResponse>(JsonSerializer.Serialize(new
+        {
+            rateLimits = new { },
+            rateLimitsByLimitId = new Dictionary<string, object?>
+            {
+                ["gpt-5.6-sol-ultra"] = new
+                {
+                    limitId = "gpt-5.6-sol-ultra",
+                    limitName = "GPT-5.6-Sol Ultra Reasoning",
+                    primary = new { usedPercent = 10.0, windowDurationMins = 300, resetsAt = 1_800_000_000L }
+                },
+                ["gpt-5.6-sol-low"] = new
+                {
+                    limitId = "gpt-5.6-sol-low",
+                    limitName = "GPT-5.6-Sol Low Reasoning",
+                    secondary = new { usedPercent = 20.0, windowDurationMins = 10080, resetsAt = 1_800_100_000L }
+                },
+                ["gpt-5.6-terra-max"] = new
+                {
+                    limitId = "gpt-5.6-terra-max",
+                    limitName = "GPT-5.6-Terra Max Reasoning",
+                    primary = new { usedPercent = 30.0, windowDurationMins = 300, resetsAt = 1_800_200_000L }
+                },
+                ["gpt-5.6-terra-low"] = new
+                {
+                    limitId = "gpt-5.6-terra-low",
+                    limitName = "GPT-5.6-Terra Low Reasoning",
+                    secondary = new { usedPercent = 40.0, windowDurationMins = 10080, resetsAt = 1_800_300_000L }
+                }
+            }
+        }))!;
+
+        var usage = CodexUsageMapper.MapUsage(response, null, DateTimeOffset.UnixEpoch)!;
+
+        Assert.Equal(2, usage.Models!.Count);
+        Assert.Equal("GPT-5.6 Sol Ultra", usage.Models[0].ModelName);
+        Assert.Equal(10, usage.Models[0].Current!.UsedPercent);
+        Assert.Equal(20, usage.Models[0].Weekly!.UsedPercent);
+        Assert.Equal("GPT-5.6 Terra Max", usage.Models[1].ModelName);
+        Assert.Equal(30, usage.Models[1].Current!.UsedPercent);
+        Assert.Equal(40, usage.Models[1].Weekly!.UsedPercent);
     }
 
     [Fact]
@@ -591,154 +735,88 @@ public sealed class TokenCountFormatterTests
     }
 }
 
-public sealed class RateLimitResetCreditTrackerTests
-{
-    [Fact]
-    public void FirstObservationMarksExistingCreditsAsUnknown()
-    {
-        var now = DateTimeOffset.Parse("2026-06-30T12:00:00+09:00");
-
-        var state = RateLimitResetCreditTracker.Update(new RateLimitResetCreditState(), 2, now);
-
-        Assert.True(state.HasObserved);
-        Assert.Equal(2, state.Credits.Count);
-        Assert.All(state.Credits, credit => Assert.Null(credit.EstimatedExpiresAt));
-    }
-
-    [Fact]
-    public void IncreaseAddsThirtyDayEstimatedExpiration()
-    {
-        var firstSeenAt = DateTimeOffset.Parse("2026-06-29T12:00:00+09:00");
-        var now = DateTimeOffset.Parse("2026-06-30T12:00:00+09:00");
-        var state = new RateLimitResetCreditState
-        {
-            HasObserved = true,
-            Credits = new List<RateLimitResetCreditObservation>
-            {
-                new(firstSeenAt, null)
-            }
-        };
-
-        var updated = RateLimitResetCreditTracker.Update(state, 2, now);
-
-        var estimated = Assert.Single(updated.Credits, credit => credit.EstimatedExpiresAt is not null);
-        Assert.Equal(now, estimated.FirstSeenAt);
-        Assert.Equal(now.AddDays(30), estimated.EstimatedExpiresAt);
-    }
-
-    [Fact]
-    public void DecreaseRemovesEarliestEstimatedExpiration()
-    {
-        var earlier = new RateLimitResetCreditObservation(
-            DateTimeOffset.Parse("2026-06-29T12:00:00+09:00"),
-            DateTimeOffset.Parse("2026-07-29T12:00:00+09:00"));
-        var later = new RateLimitResetCreditObservation(
-            DateTimeOffset.Parse("2026-06-30T12:00:00+09:00"),
-            DateTimeOffset.Parse("2026-07-30T12:00:00+09:00"));
-        var state = new RateLimitResetCreditState
-        {
-            HasObserved = true,
-            Credits = new List<RateLimitResetCreditObservation> { later, earlier }
-        };
-
-        var updated = RateLimitResetCreditTracker.Update(state, 1, DateTimeOffset.Parse("2026-07-01T12:00:00+09:00"));
-
-        Assert.Equal(later, Assert.Single(updated.Credits));
-    }
-
-    [Fact]
-    public void DecreaseRemovesUnknownLegacyCreditBeforeEstimatedCredit()
-    {
-        var legacy = new RateLimitResetCreditObservation(
-            DateTimeOffset.Parse("2026-06-29T12:00:00+09:00"),
-            null);
-        var estimated = new RateLimitResetCreditObservation(
-            DateTimeOffset.Parse("2026-06-30T12:00:00+09:00"),
-            DateTimeOffset.Parse("2026-07-30T12:00:00+09:00"));
-        var state = new RateLimitResetCreditState
-        {
-            HasObserved = true,
-            Credits = new List<RateLimitResetCreditObservation> { legacy, estimated }
-        };
-
-        var updated = RateLimitResetCreditTracker.Update(state, 1, DateTimeOffset.Parse("2026-07-01T12:00:00+09:00"));
-
-        Assert.Equal(estimated, Assert.Single(updated.Credits));
-    }
-
-    [Fact]
-    public void RepairsSingleUnknownCreditFromPriorRemovalBugWhenStillInsideThirtyDayWindow()
-    {
-        var firstSeenAt = DateTimeOffset.Parse("2026-06-30T12:00:00+09:00");
-        var state = new RateLimitResetCreditState
-        {
-            Version = 1,
-            HasObserved = true,
-            Credits = new List<RateLimitResetCreditObservation>
-            {
-                new(firstSeenAt, null)
-            }
-        };
-
-        var updated = RateLimitResetCreditTracker.Update(state, 1, DateTimeOffset.Parse("2026-07-01T12:00:00+09:00"));
-        var credit = Assert.Single(updated.Credits);
-
-        Assert.Equal(firstSeenAt.AddDays(30), credit.EstimatedExpiresAt);
-    }
-
-    [Fact]
-    public void SnapshotReportsNextEstimatedExpirationAndUnknownCount()
-    {
-        var now = DateTimeOffset.Parse("2026-06-30T12:00:00+09:00");
-        var snapshot = new RateLimitResetCreditsSnapshot(
-            2,
-            now,
-            new List<RateLimitResetCreditObservation>
-            {
-                new(now.AddDays(-1), null),
-                new(now, now.AddDays(30))
-            });
-
-        Assert.Equal(1, snapshot.UnknownExpirationCount);
-        Assert.Equal(now.AddDays(30), snapshot.NextEstimatedExpiresAt);
-    }
-}
-
 public sealed class RateLimitResetCreditFormatterTests
 {
     [Fact]
-    public void FormatsResetCreditSummaryAndDetail()
+    public void DirectSnapshotCapsDetailsToAuthoritativeAvailableCount()
     {
-        var now = DateTimeOffset.Parse("2026-06-30T12:00:00+09:00");
+        var now = DateTimeOffset.Parse("2026-07-10T12:00:00+09:00");
+        var earlierExpiry = DateTimeOffset.Parse("2026-08-01T05:05:10+09:00");
+        var laterExpiry = DateTimeOffset.Parse("2026-08-03T06:06:00+09:00");
         var snapshot = new RateLimitResetCreditsSnapshot(
-            8,
+            1,
             now,
-            new List<RateLimitResetCreditObservation>
-            {
-                new(now.AddDays(-1), null),
-                new(now, now.AddDays(29)),
-                new(now, now.AddDays(20)),
-                new(now, now.AddDays(19)),
-                new(now, now.AddDays(20)),
-                new(now.AddDays(-2), null),
-                new(now, now.AddDays(19)),
-                new(now, now.AddDays(20))
-            });
+            [
+                new RateLimitResetCredit("later", now.AddDays(-7), laterExpiry, "codexRateLimits", "available", null, null),
+                new RateLimitResetCredit("earlier", now.AddDays(-8), earlierExpiry, "codexRateLimits", "available", null, null)
+            ]);
 
-        var text = RateLimitResetCreditFormatter.Format(snapshot, "en", now);
+        var credit = Assert.Single(snapshot.Credits);
+        Assert.Equal("earlier", credit.Id);
+        Assert.Equal(earlierExpiry, snapshot.NextExpiresAt);
+        var localExpiry = earlierExpiry.ToLocalTime().ToString("yy.M.dd H:mm", CultureInfo.InvariantCulture);
+        Assert.Equal($"Expires {localExpiry}: 1", RateLimitResetCreditFormatter.FormatDetail(snapshot, "en", now));
+    }
 
-        Assert.Equal("8\uAC1C \uBCF4\uC720" + Environment.NewLine + "\uCCAB \uB9CC\uB8CC D-19", RateLimitResetCreditFormatter.FormatSummary(snapshot, "ko", now));
-        Assert.Equal("8 held" + Environment.NewLine + "First expiry D-19", text);
+    [Fact]
+    public void FormatsExactResetCreditExpirationsAndUnavailableCount()
+    {
+        var now = DateTimeOffset.Parse("2026-07-10T12:00:00+09:00");
+        var earliestExpiry = DateTimeOffset.Parse("2026-08-01T05:05:10+09:00");
+        var sameMinuteExpiry = DateTimeOffset.Parse("2026-08-01T05:05:47+09:00");
+        var laterExpiry = DateTimeOffset.Parse("2026-08-03T06:06:00+09:00");
+        var snapshot = new RateLimitResetCreditsSnapshot(
+            5,
+            now,
+            [
+                new RateLimitResetCredit("later", now.AddDays(-8), laterExpiry, "codexRateLimits", "available", null, null),
+                new RateLimitResetCredit("a", now.AddDays(-8), earliestExpiry, "codexRateLimits", "available", null, null),
+                new RateLimitResetCredit("missing", now.AddDays(-8), null, "codexRateLimits", "available", null, null),
+                new RateLimitResetCredit("b", now.AddDays(-8), sameMinuteExpiry, "codexRateLimits", "available", null, null)
+            ]);
 
-        var detail = RateLimitResetCreditFormatter.FormatDetail(snapshot, "ko", now);
+        Assert.Equal("5\uAC1C \uBCF4\uC720" + Environment.NewLine + "\uCCAB \uB9CC\uB8CC D-22", RateLimitResetCreditFormatter.FormatSummary(snapshot, "ko", now));
+        Assert.Equal("5 held" + Environment.NewLine + "First expiry D-22", RateLimitResetCreditFormatter.FormatSummary(snapshot, "en", now));
+        var earliestLocalExpiry = earliestExpiry.ToLocalTime().ToString("yy.M.dd H:mm", CultureInfo.InvariantCulture);
+        var laterLocalExpiry = laterExpiry.ToLocalTime().ToString("yy.M.dd H:mm", CultureInfo.InvariantCulture);
 
         Assert.Equal(
-            "19\uC77C \uD6C4 \uB9CC\uB8CC: 2\uAC1C" + Environment.NewLine +
-            "20\uC77C \uD6C4 \uB9CC\uB8CC: 3\uAC1C" + Environment.NewLine +
-            "29\uC77C \uD6C4 \uB9CC\uB8CC: 1\uAC1C" + Environment.NewLine +
-            "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500" + Environment.NewLine +
-            "\uAE30\uC874 \uCD08\uAE30\uD654\uAD8C: 2\uAC1C",
-            detail);
+            $"{earliestLocalExpiry} \uB9CC\uB8CC: 2\uAC1C" + Environment.NewLine
+            + $"{laterLocalExpiry} \uB9CC\uB8CC: 1\uAC1C" + Environment.NewLine
+            + "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500" + Environment.NewLine
+            + "\uB9CC\uB8CC \uC815\uBCF4 \uBBF8\uC81C\uACF5: 2\uAC1C",
+            RateLimitResetCreditFormatter.FormatDetail(snapshot, "ko", now));
+        Assert.Equal(
+            $"Expires {earliestLocalExpiry}: 2" + Environment.NewLine
+            + $"Expires {laterLocalExpiry}: 1" + Environment.NewLine
+            + "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500" + Environment.NewLine
+            + "Expiration unavailable: 2",
+            RateLimitResetCreditFormatter.FormatDetail(snapshot, "en", now));
+    }
+
+    [Fact]
+    public void FormatsUnavailableWhenAllExactRowsOmitExpiration()
+    {
+        var now = DateTimeOffset.Parse("2026-07-10T12:00:00+09:00");
+        var snapshot = new RateLimitResetCreditsSnapshot(
+            2,
+            now,
+            [
+                new RateLimitResetCredit("a", now, null, "codexRateLimits", "available", null, null),
+                new RateLimitResetCredit("b", now, null, "codexRateLimits", "available", null, null)
+            ]);
+
+        Assert.Equal("2 held" + Environment.NewLine + "Expiration unavailable", RateLimitResetCreditFormatter.FormatSummary(snapshot, "en", now));
+        Assert.Equal("Expiration unavailable: 2", RateLimitResetCreditFormatter.FormatDetail(snapshot, "en", now));
+    }
+
+    [Fact]
+    public void FormatsUnavailableWhenAppServerReturnsCountOnly()
+    {
+        var snapshot = new RateLimitResetCreditsSnapshot(1, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal("1\uAC1C \uBCF4\uC720" + Environment.NewLine + "\uB9CC\uB8CC \uC815\uBCF4 \uBBF8\uC81C\uACF5", RateLimitResetCreditFormatter.FormatSummary(snapshot, "ko", DateTimeOffset.UnixEpoch));
+        Assert.Equal("\uB9CC\uB8CC \uC815\uBCF4 \uBBF8\uC81C\uACF5: 1\uAC1C", RateLimitResetCreditFormatter.FormatDetail(snapshot, "ko", DateTimeOffset.UnixEpoch));
     }
 }
 
@@ -798,6 +876,39 @@ public sealed class CodexSessionStateReaderTests
         Assert.Equal("gpt-5.5", selection!.Model);
         Assert.Equal("xhigh", selection.ReasoningEffort);
         Assert.Equal("GPT-5.5 XHigh", selection.DisplayName);
+    }
+
+    [Theory]
+    [InlineData("max", "Max")]
+    [InlineData("ultra", "Ultra")]
+    public void ReadsGpt56ExtendedReasoningEfforts(string effort, string displayEffort)
+    {
+        var codexHome = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var sessionDir = Path.Combine(codexHome, "sessions", "2026", "07", "10");
+        Directory.CreateDirectory(sessionDir);
+        File.WriteAllLines(
+            Path.Combine(sessionDir, "rollout-user.jsonl"),
+            [
+                JsonSerializer.Serialize(new
+                {
+                    timestamp = "2026-07-10T00:59:00Z",
+                    type = "session_meta",
+                    payload = new { id = "user", thread_source = "user", source = "desktop" }
+                }),
+                JsonSerializer.Serialize(new
+                {
+                    timestamp = "2026-07-10T00:59:01Z",
+                    type = "turn_context",
+                    payload = new { model = "gpt-5.6-sol", effort }
+                })
+            ]);
+
+        var selection = CodexSessionStateReader.ReadLatest(TestEnvironment(codexHome));
+
+        Assert.NotNull(selection);
+        Assert.Equal("gpt-5.6-sol", selection!.Model);
+        Assert.Equal(effort, selection.ReasoningEffort);
+        Assert.Equal($"GPT-5.6 Sol {displayEffort}", selection.DisplayName);
     }
 
     [Fact]
@@ -1126,30 +1237,21 @@ public sealed class UsageStoreTests
     }
 
     [Fact]
-    public async Task RefreshTracksResetCreditIncreaseFromLocalObservation()
+    public async Task RefreshPreservesProviderResetCreditSnapshot()
     {
-        var firstObservation = DateTimeOffset.Parse("2026-06-29T12:00:00+09:00");
-        var secondObservation = DateTimeOffset.Parse("2026-06-30T12:00:00+09:00");
-        var settings = TestSettings();
-        var descriptor = TestDescriptor(
-            FetchResultWithResetCredits(1, firstObservation),
-            FetchResultWithResetCredits(2, secondObservation));
-        var store = new UsageStore(
-            settings,
-            descriptor,
-            new RateLimitResetCreditTracker(new InMemoryRateLimitResetCreditStateStore()));
+        var now = DateTimeOffset.Parse("2026-07-10T12:00:00+09:00");
+        var resetCredits = new RateLimitResetCreditsSnapshot(
+            1,
+            now,
+            [new RateLimitResetCredit("reset-1", now.AddDays(-8), now.AddDays(22), "codexRateLimits", "available", null, null)]);
+        var result = FetchResultWithResetCredits(resetCredits, now);
+        var expectedUsage = result.Usage;
+        var store = new UsageStore(TestSettings(), TestDescriptor(result));
 
         await store.RefreshAsync(CancellationToken.None);
 
-        Assert.Equal(1, store.Snapshot!.RateLimitResetCredits!.UnknownExpirationCount);
-        Assert.Null(store.Snapshot.RateLimitResetCredits.NextEstimatedExpiresAt);
-
-        await store.RefreshAsync(CancellationToken.None);
-
-        var resetCredits = store.Snapshot!.RateLimitResetCredits!;
-        Assert.Equal(2, resetCredits.AvailableCount);
-        Assert.Equal(1, resetCredits.UnknownExpirationCount);
-        Assert.Equal(secondObservation.AddDays(30), resetCredits.NextEstimatedExpiresAt);
+        Assert.Same(expectedUsage, store.Snapshot);
+        Assert.Same(resetCredits, store.Snapshot!.RateLimitResetCredits);
     }
 
     private static SettingsStore TestSettings()
@@ -1180,7 +1282,9 @@ public sealed class UsageStoreTests
         return new ProviderFetchResult(usage, credits, "test", "test", ProviderFetchKind.LocalProbe);
     }
 
-    private static ProviderFetchResult FetchResultWithResetCredits(long resetCreditCount, DateTimeOffset now)
+    private static ProviderFetchResult FetchResultWithResetCredits(
+        RateLimitResetCreditsSnapshot resetCredits,
+        DateTimeOffset now)
     {
         var usage = new UsageSnapshot(
             new RateWindow(10, 300, DateTimeOffset.FromUnixTimeSeconds(1_800_000_000), "in 1h"),
@@ -1188,9 +1292,13 @@ public sealed class UsageStoreTests
             null,
             now,
             new ProviderIdentitySnapshot(UsageProvider.Codex, "me@example.com", null, "plus"),
-            RateLimitResetCredits: new RateLimitResetCreditsSnapshot(resetCreditCount, now));
-        var credits = new CreditsSnapshot(55, Array.Empty<CreditEvent>(), now);
-        return new ProviderFetchResult(usage, credits, "test", "test", ProviderFetchKind.LocalProbe);
+            RateLimitResetCredits: resetCredits);
+        return new ProviderFetchResult(
+            usage,
+            new CreditsSnapshot(55, Array.Empty<CreditEvent>(), now),
+            "test",
+            "test",
+            ProviderFetchKind.LocalProbe);
     }
 }
 
@@ -1301,18 +1409,6 @@ internal sealed class QueueProviderFetchStrategy : IProviderFetchStrategy
     }
 
     public bool ShouldFallback(Exception error, ProviderFetchContext context) => false;
-}
-
-internal sealed class InMemoryRateLimitResetCreditStateStore : IRateLimitResetCreditStateStore
-{
-    private RateLimitResetCreditState _state = new();
-
-    public RateLimitResetCreditState Load() => _state;
-
-    public void Save(RateLimitResetCreditState state)
-    {
-        _state = state;
-    }
 }
 
 internal sealed class QueueCodexRpcTransportFactory : ICodexRpcTransportFactory

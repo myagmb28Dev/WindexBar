@@ -802,6 +802,8 @@ public static class CodexSessionStateReader
     {
         return NormalizeEffort(effort) switch
         {
+            "ultra" => "Ultra",
+            "max" => "Max",
             "xhigh" => "XHigh",
             "high" => "High",
             "medium" => "Medium",

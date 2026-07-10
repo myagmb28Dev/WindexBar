@@ -1,34 +1,68 @@
 # WindexBar
+<img width="372" height="457" alt="image" src="https://github.com/user-attachments/assets/5f608937-4362-4450-9327-606bf7b33c4f" />
 
-WindexBar is a small Windows tray app for quickly checking Codex usage and status.
+### WindexBar is a small Windows tray app for quickly checking Codex usage and status.
 
-<img width="335" height="505" alt="kr" src="https://github.com/user-attachments/assets/c545974d-044b-4b73-aaeb-5472315f8d1f" />
-<img width="341" height="507" alt="eng" src="https://github.com/user-attachments/assets/8cc6a0ca-178b-43ce-8779-8831e01842b9" />
+
 
 ## Features
 
 - System tray status for Codex usage, with a compact always-on-top window.
 - Current/session and weekly rate-limit windows, including reset countdowns when Codex exposes reset times.
-- Active Codex model and token usage, including context-window usage when available.
-- Banked rate-limit reset credit count and best-effort expiration estimates.
+- Active Codex model and reasoning effort (including Max and Ultra when exposed), plus token and context-window usage.
+- Banked rate-limit reset credit count with exact expiration details from Codex app-server when provided.
+- Reset-credit details grouped by exact expiration time, with unavailable expirations shown explicitly.
 - Remaining ChatGPT credits when Codex exposes the balance.
-- Settings for refresh interval, language, Windows startup, and the Alt+O show/hide shortcut.
+- Collapsible sidebar, toggled from the title or a shortcut.
+- Optional auto-show mode while ChatGPT Desktop or a terminal Codex process is active.
+- Settings for refresh interval, language, Windows startup, Alt+O show/hide, and Alt+B sidebar shortcuts.
 
-Reset-credit expiration estimates are local best-effort estimates. They are calculated only for banked reset credits observed after this update; credits that already existed when WindexBar first sees them may show an unknown expiry. Estimated dates can be off because Codex currently exposes the available count, not individual grant or expiration timestamps.
+Reset-credit expiration dates come directly from Codex app-server. If the installed Codex version or backend returns only the available count, WindexBar shows that expiration details are unavailable instead of estimating a date.
 
 ## Install
 
 Download and run `WindexBarSetup.exe` from the GitHub Releases page.
 
+Source install:
+
+```powershell
+.\install.cmd
+```
+
+Source install launches WindexBar after installation by default.
+Use `.\install.cmd -NoLaunch` to install without launching, or `.\install.cmd -NoStartup` to skip the Windows startup shortcut.
+
 ## Requirements
 
 - Codex CLI: WindexBar reads Codex usage through `codex app-server`, so the `codex` command must be available on `PATH`.
+- Keep Codex CLI up to date: whenever you update WindexBar to a new release, update Codex CLI to the latest version as well.
 - Install Codex CLI: [Codex CLI setup](https://developers.openai.com/codex/cli)
-  - Windows PowerShell: `powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"`
-  - Node/npm: `npm install -g @openai/codex`
-  - Bun: `bun install -g @openai/codex`
-  - Homebrew: `brew install --cask codex`
-  - Other downloads: [Codex releases](https://github.com/openai/codex/releases/latest)
+
+Windows PowerShell:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"
+```
+
+Node/npm:
+
+```shell
+npm install -g @openai/codex
+```
+
+Bun:
+
+```shell
+bun install -g @openai/codex
+```
+
+Homebrew:
+
+```shell
+brew install --cask codex
+```
+
+Other downloads: [Codex releases](https://github.com/openai/codex/releases/latest)
 
 ## Usage
 
@@ -36,7 +70,10 @@ Run the app, then WindexBar appears as an icon in the system tray.
 
 - Left click: open the status window
 - Right click: open Settings or Quit
+- Click the title: collapse or expand the sidebar
 - Alt+O: hide or show the WindexBar window
+- Alt+B: collapse or expand the sidebar
+- Enable Codex auto-show in Settings to show WindexBar only while ChatGPT Desktop or a terminal Codex process is active
 
 ## Development
 

@@ -1299,6 +1299,10 @@ public sealed partial class MainWindow : Window
         var trimmed = value.Replace('_', ' ').Replace('-', ' ').Trim();
         var suffixes = new[]
         {
+            " ultra reasoning effort",
+            " max reasoning effort",
+            " ultra reasoning",
+            " max reasoning",
             " extra high reasoning effort",
             " extra high reasoning",
             " xhigh reasoning effort",
@@ -1314,6 +1318,8 @@ public sealed partial class MainWindow : Window
             " no reasoning",
             " none reasoning",
             " extra high",
+            " ultra",
+            " max",
             " xhigh",
             " high",
             " medium",
