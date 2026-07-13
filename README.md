@@ -1,5 +1,6 @@
 # WindexBar
-<img width="372" height="457" alt="image" src="https://github.com/user-attachments/assets/5f608937-4362-4450-9327-606bf7b33c4f" />
+<img width="376" height="396" alt="image" src="https://github.com/user-attachments/assets/d170b39a-54d5-4adb-8bf3-d79ee332899b" />
+
 
 ### WindexBar is a small Windows tray app for quickly checking Codex usage and status.
 
