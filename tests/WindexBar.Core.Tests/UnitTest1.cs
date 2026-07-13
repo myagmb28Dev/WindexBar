@@ -291,6 +291,41 @@ public sealed class MappingTests
     }
 
     [Fact]
+    public void MapsWeeklyOnlyPrimaryWindowByDuration()
+    {
+        var response = JsonSerializer.Deserialize<RpcRateLimitsResponse>(JsonSerializer.Serialize(new
+        {
+            rateLimits = new
+            {
+                limitId = "codex",
+                primary = new { usedPercent = 0.0, windowDurationMins = 10080, resetsAt = 1_800_100_000L },
+                secondary = (object?)null,
+                planType = "pro"
+            },
+            rateLimitsByLimitId = new Dictionary<string, object?>
+            {
+                ["codex"] = new
+                {
+                    limitId = "codex",
+                    primary = new { usedPercent = 0.0, windowDurationMins = 10080, resetsAt = 1_800_100_000L },
+                    secondary = (object?)null,
+                    planType = "pro"
+                }
+            }
+        }))!;
+
+        var usage = CodexUsageMapper.MapUsage(response, null, DateTimeOffset.UnixEpoch)!;
+
+        Assert.Null(usage.Primary);
+        Assert.Equal(0, usage.Secondary!.UsedPercent);
+        Assert.Equal(10080, usage.Secondary.WindowMinutes);
+        var model = Assert.Single(usage.Models!);
+        Assert.Null(model.Current);
+        Assert.Equal(0, model.Weekly!.UsedPercent);
+        Assert.Equal(10080, model.Weekly.WindowMinutes);
+    }
+
+    [Fact]
     public void MapsNestedModelLimitContainer()
     {
         var response = JsonSerializer.Deserialize<RpcRateLimitsResponse>(JsonSerializer.Serialize(new
