@@ -9,8 +9,12 @@ public sealed class UsageStore : IDisposable
 {
     private readonly SettingsStore _settings;
     private readonly ProviderDescriptor _codexDescriptor;
+    private readonly object _sessionIndexWatcherLock = new();
+    private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private PeriodicTimer? _timer;
     private CancellationTokenSource? _loopCts;
+    private CancellationTokenSource? _sessionIndexDebounceCts;
+    private FileSystemWatcher? _sessionIndexWatcher;
 
     public UsageStore(
         SettingsStore settings,
@@ -29,6 +33,19 @@ public sealed class UsageStore : IDisposable
     public event EventHandler? Changed;
 
     public async Task RefreshAsync(CancellationToken cancellationToken = default)
+    {
+        await _refreshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await RefreshCoreAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _refreshGate.Release();
+        }
+    }
+
+    private async Task RefreshCoreAsync(CancellationToken cancellationToken)
     {
         var providerConfig = _settings.Codex;
         if (!providerConfig.Enabled)
@@ -85,6 +102,7 @@ public sealed class UsageStore : IDisposable
         StopBackgroundRefresh();
         _loopCts = new CancellationTokenSource();
         _timer = new PeriodicTimer(TimeSpan.FromSeconds(_settings.Codex.RefreshIntervalSeconds));
+        StartSessionIndexWatcher();
         _ = Task.Run(async () =>
         {
             await RefreshAsync(_loopCts.Token).ConfigureAwait(false);
@@ -97,11 +115,82 @@ public sealed class UsageStore : IDisposable
 
     public void StopBackgroundRefresh()
     {
+        StopSessionIndexWatcher();
         _loopCts?.Cancel();
         _loopCts?.Dispose();
         _loopCts = null;
         _timer?.Dispose();
         _timer = null;
+    }
+
+    private void StartSessionIndexWatcher()
+    {
+        var codexHome = Environment.GetEnvironmentVariable("CODEX_HOME");
+        if (string.IsNullOrWhiteSpace(codexHome))
+        {
+            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            codexHome = string.IsNullOrWhiteSpace(userProfile) ? null : Path.Combine(userProfile, ".codex");
+        }
+
+        if (string.IsNullOrWhiteSpace(codexHome) || !Directory.Exists(codexHome))
+        {
+            return;
+        }
+
+        _sessionIndexWatcher = new FileSystemWatcher(codexHome, "session_index.jsonl")
+        {
+            NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size
+        };
+        _sessionIndexWatcher.Changed += OnSessionIndexChanged;
+        _sessionIndexWatcher.Created += OnSessionIndexChanged;
+        _sessionIndexWatcher.Renamed += OnSessionIndexChanged;
+        _sessionIndexWatcher.EnableRaisingEvents = true;
+    }
+
+    private void OnSessionIndexChanged(object sender, FileSystemEventArgs args)
+    {
+        CancellationTokenSource debounceCts;
+        lock (_sessionIndexWatcherLock)
+        {
+            _sessionIndexDebounceCts?.Cancel();
+            _sessionIndexDebounceCts?.Dispose();
+            debounceCts = _loopCts is null
+                ? new CancellationTokenSource()
+                : CancellationTokenSource.CreateLinkedTokenSource(_loopCts.Token);
+            _sessionIndexDebounceCts = debounceCts;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(250, debounceCts.Token).ConfigureAwait(false);
+                await RefreshAsync(debounceCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (debounceCts.IsCancellationRequested)
+            {
+            }
+        }, debounceCts.Token);
+    }
+
+    private void StopSessionIndexWatcher()
+    {
+        lock (_sessionIndexWatcherLock)
+        {
+            _sessionIndexDebounceCts?.Cancel();
+            _sessionIndexDebounceCts?.Dispose();
+            _sessionIndexDebounceCts = null;
+
+            if (_sessionIndexWatcher is not null)
+            {
+                _sessionIndexWatcher.EnableRaisingEvents = false;
+                _sessionIndexWatcher.Changed -= OnSessionIndexChanged;
+                _sessionIndexWatcher.Created -= OnSessionIndexChanged;
+                _sessionIndexWatcher.Renamed -= OnSessionIndexChanged;
+                _sessionIndexWatcher.Dispose();
+                _sessionIndexWatcher = null;
+            }
+        }
     }
 
     private void OnChanged() => Changed?.Invoke(this, EventArgs.Empty);

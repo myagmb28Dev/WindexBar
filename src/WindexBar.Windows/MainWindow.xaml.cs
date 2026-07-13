@@ -50,6 +50,7 @@ public sealed partial class MainWindow : Window
     private double _targetWeeklyBarValue;
     private bool _isFastServiceTier;
     private bool _isSideBarOpen = true;
+    private bool _projectSessionsFirst = true;
     private Grid TitleBarDragRegion = null!;
     private Grid ContentRootGrid = null!;
     private Grid SideBarHost = null!;
@@ -454,8 +455,8 @@ public sealed partial class MainWindow : Window
 
         SessionUsagePanel = new StackPanel { Spacing = 7 };
         content.Children.Add(SessionUsagePanel);
-        SessionSortToggleButton.Checked += (_, _) => ApplySessionSortPreference();
-        SessionSortToggleButton.Unchecked += (_, _) => ApplySessionSortPreference();
+        SessionSortToggleButton.Checked += (_, _) => ApplySessionSortPreference(projectSessionsFirst: true);
+        SessionSortToggleButton.Unchecked += (_, _) => ApplySessionSortPreference(projectSessionsFirst: false);
         UpdateSessionSortToggleAppearance();
 
         var sessionsButtons = new StackPanel
@@ -469,19 +470,19 @@ public sealed partial class MainWindow : Window
         sessionsButtons.Children.Add(CreateQuitButton());
     }
 
-    private void ApplySessionSortPreference()
+    private void ApplySessionSortPreference(bool projectSessionsFirst)
     {
+        _projectSessionsFirst = projectSessionsFirst;
         UpdateSessionSortToggleAppearance();
         UpdateSessionUsageView(_usageStore.Snapshot?.Sessions);
     }
 
     private void UpdateSessionSortToggleAppearance()
     {
-        var projectFirst = SessionSortToggleButton.IsChecked == true;
-        SessionSortToggleButton.Content = projectFirst ? "P\u2191" : "N\u2191";
+        SessionSortToggleButton.Content = _projectSessionsFirst ? "P\u2191" : "N\u2191";
         ToolTipService.SetToolTip(
             SessionSortToggleButton,
-            projectFirst
+            _projectSessionsFirst
                 ? Text("Project sessions first", "\uD504\uB85C\uC81D\uD2B8 \uC138\uC158 \uC6B0\uC120")
                 : Text("Non-project sessions first", "\uBE44\uD504\uB85C\uC81D\uD2B8 \uC138\uC158 \uC6B0\uC120"));
     }
@@ -1743,10 +1744,10 @@ public sealed partial class MainWindow : Window
                     projectSessions);
             })
             .ToArray();
-        var projectFirst = SessionSortToggleButton.IsChecked == true;
         var orderedProjectGroups = projectGroups
-            .OrderBy(group => projectFirst ? (group.IsNonProject ? 1 : 0) : (group.IsNonProject ? 0 : 1))
-            .ThenBy(group => group.ProjectName, StringComparer.CurrentCultureIgnoreCase);
+            .OrderBy(group => _projectSessionsFirst ? (group.IsNonProject ? 1 : 0) : (group.IsNonProject ? 0 : 1))
+            .ThenBy(group => group.ProjectName, StringComparer.CurrentCultureIgnoreCase)
+            .ToArray();
 
         foreach (var projectGroup in orderedProjectGroups)
         {
@@ -1970,16 +1971,17 @@ public sealed partial class MainWindow : Window
 
         var normalized = NormalizeProjectPath(projectPath);
         var folderName = Path.GetFileName(normalized);
-        if (!folderName.StartsWith("new-chat-", StringComparison.OrdinalIgnoreCase)
-            || !int.TryParse(folderName["new-chat-".Length..], out _))
+        if (string.IsNullOrWhiteSpace(folderName))
         {
             return false;
         }
 
         var datePath = Path.GetDirectoryName(normalized);
         var codexPath = string.IsNullOrWhiteSpace(datePath) ? null : Path.GetDirectoryName(datePath);
+        var documentsPath = string.IsNullOrWhiteSpace(codexPath) ? null : Path.GetDirectoryName(codexPath);
         var dateFolder = string.IsNullOrWhiteSpace(datePath) ? null : Path.GetFileName(datePath);
         return string.Equals(Path.GetFileName(codexPath), "Codex", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(Path.GetFileName(documentsPath), "Documents", StringComparison.OrdinalIgnoreCase)
             && DateTime.TryParseExact(
                 dateFolder,
                 "yyyy-MM-dd",

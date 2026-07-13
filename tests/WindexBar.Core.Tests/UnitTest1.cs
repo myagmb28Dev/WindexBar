@@ -1221,6 +1221,7 @@ public sealed class CodexSessionStateReaderTests
         File.WriteAllText(userPath, """
         {"timestamp":"2026-06-18T00:59:00Z","type":"session_meta","payload":{"id":"user","thread_source":"user","source":"desktop"}}
         {"timestamp":"2026-06-18T00:59:01Z","type":"turn_context","payload":{"model":"gpt-5.3-codex-spark","effort":"xhigh"}}
+        {"timestamp":"2026-06-18T00:59:01Z","type":"event_msg","payload":{"type":"user_message","message":"Immediate session title"}}
         {"timestamp":"2026-06-18T00:59:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":35223,"cached_input_tokens":26880,"output_tokens":1137,"reasoning_output_tokens":569,"total_tokens":36360},"last_token_usage":{"input_tokens":18316,"cached_input_tokens":16768,"output_tokens":555,"reasoning_output_tokens":230,"total_tokens":18871},"model_context_window":258400},"rate_limits":{"limit_id":"gpt-5.3-codex-spark","limit_name":null,"primary":{"used_percent":20.0,"window_minutes":300,"resets_at":1800000000},"secondary":{"used_percent":6.0,"window_minutes":10080,"resets_at":1800100000},"plan_type":"pro"}}}
         """);
 
@@ -1237,6 +1238,7 @@ public sealed class CodexSessionStateReaderTests
         Assert.Equal(26880, state.TokenUsage.Total.CachedInputTokens);
         Assert.Equal(18871, state.TokenUsage.Last!.TotalTokens);
         Assert.Equal(258400, state.TokenUsage.ModelContextWindow);
+        Assert.Equal("Immediate session title", Assert.Single(state.Sessions!).SessionName);
     }
 
     [Fact]
