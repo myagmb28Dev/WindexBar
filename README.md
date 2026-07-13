@@ -8,9 +8,10 @@
 ## Features
 
 - System tray status for Codex usage, with a compact always-on-top window.
-- Current/session and weekly rate-limit windows, including reset countdowns when Codex exposes reset times.
+- Account-wide current and weekly rate-limit windows, including reset countdowns when Codex exposes reset times.
 - Active Codex model and reasoning effort (including Max and Ultra when exposed).
-  - Per-project Codex session names, plus project-free general sessions, with context-window usage percentages and cumulative session token totals.
+- Per-session context-window usage and cumulative token totals, grouped by project.
+- Live updates for Codex-generated and manually edited session names, with project-free conversations grouped under `default-session`.
 - Banked rate-limit reset credit count with exact expiration details from Codex app-server when provided.
 - Reset-credit details grouped by exact expiration time, with unavailable expirations shown explicitly.
 - Remaining ChatGPT credits when Codex exposes the balance.
@@ -72,6 +73,7 @@ Run the app, then WindexBar appears as an icon in the system tray.
 - Left click: open the status window
 - Right click: open Settings or Quit
 - Click the title: collapse or expand the sidebar
+- Open Sessions from the sidebar to inspect per-session usage
 - Alt+O: hide or show the WindexBar window
 - Alt+B: collapse or expand the sidebar
 - Enable Codex auto-show in Settings to show WindexBar only while ChatGPT Desktop or a terminal Codex process is active
