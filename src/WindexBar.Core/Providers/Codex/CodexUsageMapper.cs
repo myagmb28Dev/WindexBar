@@ -67,7 +67,7 @@ public static class CodexUsageMapper
             .Cast<RateWindow>()
             .ToArray();
 
-        var primary = usage.Primary ?? mappedWindows.FirstOrDefault();
+        var primary = usage.Primary ?? models.Select(model => model.Current).FirstOrDefault(window => window is not null);
         var secondary = usage.Secondary ?? models.Select(model => model.Weekly).FirstOrDefault(window => window is not null);
         var tertiary = usage.Tertiary ?? mappedWindows.FirstOrDefault(window => !Equals(window, primary) && !Equals(window, secondary));
         return usage with { Primary = primary, Secondary = secondary, Tertiary = tertiary, Models = models };
@@ -86,8 +86,7 @@ public static class CodexUsageMapper
     {
         var identity = MapIdentity(rootLimits, account);
 
-        var explicitPrimary = MapWindow(rootLimits.Primary);
-        var explicitSecondary = MapWindow(rootLimits.Secondary);
+        var rootWindows = MapCanonicalWindows(rootLimits);
         var models = MapLimitBuckets(buckets);
         var mappedWindows = models
             .SelectMany(model => new[] { model.Current, model.Weekly })
@@ -95,8 +94,8 @@ public static class CodexUsageMapper
             .Cast<RateWindow>()
             .ToArray();
 
-        var primary = explicitPrimary ?? mappedWindows.FirstOrDefault();
-        var secondary = explicitSecondary ?? models.Select(model => model.Weekly).FirstOrDefault(window => window is not null);
+        var primary = rootWindows.Current ?? models.Select(model => model.Current).FirstOrDefault(window => window is not null);
+        var secondary = rootWindows.Weekly ?? models.Select(model => model.Weekly).FirstOrDefault(window => window is not null);
         var tertiary = mappedWindows.FirstOrDefault(window => !Equals(window, primary) && !Equals(window, secondary));
 
         if (primary is null
@@ -284,9 +283,8 @@ public static class CodexUsageMapper
         var models = new List<ModelUsageSnapshot>();
         foreach (var bucket in buckets)
         {
-            var current = MapWindow(bucket.Limits.Primary);
-            var weekly = MapWindow(bucket.Limits.Secondary);
-            foreach (var model in MapModelUsages(bucket.Limits, current, weekly))
+            var windows = MapCanonicalWindows(bucket.Limits);
+            foreach (var model in MapModelUsages(bucket.Limits, windows.Current, windows.Weekly))
             {
                 var modelName = string.Equals(model.ModelName, "Codex", StringComparison.OrdinalIgnoreCase)
                     ? bucket.DisplayName
@@ -296,6 +294,25 @@ public static class CodexUsageMapper
         }
 
         return models;
+    }
+
+    private static (RateWindow? Current, RateWindow? Weekly) MapCanonicalWindows(RpcRateLimitSnapshot limits)
+    {
+        var model = new ModelUsageBuilder("Codex");
+        ApplyCanonicalWindow(model, "primary", limits.Primary);
+        ApplyCanonicalWindow(model, "secondary", limits.Secondary);
+        return (model.Current, model.Weekly);
+    }
+
+    private static void ApplyCanonicalWindow(ModelUsageBuilder model, string key, RpcRateLimitWindow? source)
+    {
+        var window = MapWindow(source);
+        if (window is null)
+        {
+            return;
+        }
+
+        ApplyWindow(model, ResolveWindowKind(key, window), window);
     }
 
     private static IReadOnlyList<ModelUsageSnapshot> MergeModelUsages(
