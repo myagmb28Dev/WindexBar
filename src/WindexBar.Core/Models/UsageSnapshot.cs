@@ -15,7 +15,8 @@ public sealed record UsageSnapshot(
     IReadOnlyList<ModelUsageSnapshot>? Models = null,
     CodexModelSelection? ActiveModel = null,
     TokenUsageSnapshot? TokenUsage = null,
-    RateLimitResetCreditsSnapshot? RateLimitResetCredits = null)
+    RateLimitResetCreditsSnapshot? RateLimitResetCredits = null,
+    IReadOnlyList<CodexSessionUsageSnapshot>? Sessions = null)
 {
     public bool HasRateLimitWindows =>
         Primary is not null
@@ -46,6 +47,13 @@ public sealed record TokenUsageBreakdown(
     long OutputTokens,
     long ReasoningOutputTokens,
     long TotalTokens);
+
+public sealed record CodexSessionUsageSnapshot(
+    string SessionId,
+    string? SessionName,
+    string? ProjectPath,
+    TokenUsageSnapshot TokenUsage,
+    DateTimeOffset UpdatedAt);
 
 public sealed record CreditEvent(Guid Id, DateTimeOffset Date, string Service, double CreditsUsed);
 

@@ -145,3 +145,33 @@ public sealed class RpcAccountDetails
     [JsonPropertyName("planType")]
     public string? PlanType { get; set; }
 }
+
+public sealed class RpcThreadListResponse
+{
+    [JsonPropertyName("data")]
+    public List<RpcThreadSummary> Data { get; set; } = [];
+
+    [JsonPropertyName("nextCursor")]
+    public string? NextCursor { get; set; }
+}
+
+public sealed class RpcThreadSummary
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = string.Empty;
+
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+
+    [JsonPropertyName("preview")]
+    public string? Preview { get; set; }
+
+    [JsonPropertyName("cwd")]
+    public string? Cwd { get; set; }
+
+    [JsonPropertyName("createdAt")]
+    public long CreatedAt { get; set; }
+
+    [JsonPropertyName("updatedAt")]
+    public long UpdatedAt { get; set; }
+}

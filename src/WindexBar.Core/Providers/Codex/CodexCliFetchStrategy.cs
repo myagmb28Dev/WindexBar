@@ -29,6 +29,7 @@ public sealed class CodexCliFetchStrategy : IProviderFetchStrategy
         var sessionState = CodexSessionStateReader.ReadLatestState(context.Environment);
         var activeModel = sessionState?.ActiveModel;
         var tokenUsage = sessionState?.TokenUsage;
+        var sessions = sessionState?.Sessions ?? [];
         var now = DateTimeOffset.Now;
 
         await using var transport = _transportFactory.Start(executable, BaseArguments, context.Environment);
@@ -45,6 +46,15 @@ public sealed class CodexCliFetchStrategy : IProviderFetchStrategy
         {
         }
 
+        try
+        {
+            var threads = await client.FetchThreadsAsync(cancellationToken).ConfigureAwait(false);
+            sessions = EnrichSessions(sessions, threads.Data);
+        }
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        {
+        }
+
         var usage = CodexUsageMapper.MapUsage(limits, account, now);
         var credits = context.IncludeCredits ? CodexUsageMapper.MapCredits(limits.RateLimits.Credits, now) : null;
         if (usage is null && credits is null && activeModel is null && tokenUsage is null)
@@ -53,10 +63,41 @@ public sealed class CodexCliFetchStrategy : IProviderFetchStrategy
         }
 
         usage ??= new UsageSnapshot(null, null, null, now, null);
-        usage = usage with { ActiveModel = activeModel, TokenUsage = tokenUsage };
+        usage = usage with { ActiveModel = activeModel, TokenUsage = tokenUsage, Sessions = sessions };
         return new ProviderFetchResult(usage, credits, "codex-cli", Id, Kind);
     }
 
     public bool ShouldFallback(Exception error, ProviderFetchContext context) => false;
+
+    private static IReadOnlyList<CodexSessionUsageSnapshot> EnrichSessions(
+        IReadOnlyList<CodexSessionUsageSnapshot> sessions,
+        IReadOnlyList<RpcThreadSummary> threads)
+    {
+        if (sessions.Count == 0 || threads.Count == 0)
+        {
+            return sessions;
+        }
+
+        var threadsById = threads
+            .Where(thread => !string.IsNullOrWhiteSpace(thread.Id))
+            .GroupBy(thread => thread.Id, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+        return sessions
+            .Select(session => threadsById.TryGetValue(session.SessionId, out var thread)
+                ? session with
+                {
+                    SessionName = ThreadDisplayName(thread) ?? session.SessionName,
+                    ProjectPath = string.IsNullOrWhiteSpace(thread.Cwd) ? session.ProjectPath : thread.Cwd.Trim()
+                }
+                : session)
+            .ToArray();
+    }
+
+    private static string? ThreadDisplayName(RpcThreadSummary thread)
+    {
+        var displayName = string.IsNullOrWhiteSpace(thread.Name) ? thread.Preview : thread.Name;
+        return string.IsNullOrWhiteSpace(displayName) ? null : displayName.Trim();
+    }
 }
 

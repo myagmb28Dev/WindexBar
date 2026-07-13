@@ -9,7 +9,8 @@
 
 - System tray status for Codex usage, with a compact always-on-top window.
 - Current/session and weekly rate-limit windows, including reset countdowns when Codex exposes reset times.
-- Active Codex model and reasoning effort (including Max and Ultra when exposed), plus token and context-window usage.
+- Active Codex model and reasoning effort (including Max and Ultra when exposed).
+  - Per-project Codex session names, plus project-free general sessions, with context-window usage percentages and cumulative session token totals.
 - Banked rate-limit reset credit count with exact expiration details from Codex app-server when provided.
 - Reset-credit details grouped by exact expiration time, with unavailable expirations shown explicitly.
 - Remaining ChatGPT credits when Codex exposes the balance.

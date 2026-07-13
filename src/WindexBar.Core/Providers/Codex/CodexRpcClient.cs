@@ -63,6 +63,21 @@ public sealed class CodexRpcClient : IAsyncDisposable
     public Task<RpcAccountResponse> FetchAccountAsync(CancellationToken cancellationToken) =>
         RequestAsync("account/read", null, _requestTimeout, WindexBarJsonContext.Default.RpcAccountResponse, cancellationToken);
 
+    public Task<RpcThreadListResponse> FetchThreadsAsync(CancellationToken cancellationToken) =>
+        RequestAsync(
+            "thread/list",
+            new JsonObject
+            {
+                ["limit"] = 100,
+                ["archived"] = false,
+                ["sortKey"] = "updated_at",
+                ["sortDirection"] = "desc",
+                ["sourceKinds"] = new JsonArray("cli", "vscode", "appServer")
+            },
+            _requestTimeout,
+            WindexBarJsonContext.Default.RpcThreadListResponse,
+            cancellationToken);
+
     private async Task RequestAsync(string method, JsonObject? parameters, TimeSpan timeout, CancellationToken cancellationToken)
     {
         _ = await RequestResultAsync(method, parameters, timeout, cancellationToken).ConfigureAwait(false);
