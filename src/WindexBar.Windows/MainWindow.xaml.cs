@@ -39,13 +39,15 @@ public sealed partial class MainWindow : Window
     private readonly DispatcherTimer _barAnimationTimer = new();
     private readonly List<DispatcherTimer> _scrollBarHideTimers = [];
     private readonly List<ModelUsageView> _modelUsages = [];
+    private readonly List<Button> _quitButtons = [];
+    private readonly List<SessionUsageBarView> _sessionUsageBars = [];
+    private readonly Dictionary<string, double> _sessionBarValues = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, bool> _collapsedSessionGroups = new(StringComparer.OrdinalIgnoreCase);
     private double _barSweepPhase;
     private double _currentBarValue;
     private double _targetCurrentBarValue;
     private double _weeklyBarValue;
     private double _targetWeeklyBarValue;
-    private double _tokenBarValue;
-    private double _targetTokenBarValue;
     private bool _isFastServiceTier;
     private bool _isSideBarOpen = true;
     private Grid TitleBarDragRegion = null!;
@@ -54,6 +56,7 @@ public sealed partial class MainWindow : Window
     private ColumnDefinition SideBarColumn = null!;
     private StackPanel SideBarPanel = null!;
     private Border HudView = null!;
+    private Border SessionsView = null!;
     private Border CreditsView = null!;
     private Border SettingsView = null!;
     private Border ResetCreditDetailsView = null!;
@@ -73,11 +76,7 @@ public sealed partial class MainWindow : Window
     private Border WeeklyWindowFillBar = null!;
     private Border WeeklyWindowSweepBar = null!;
     private TextBlock WeeklyWindowText = null!;
-    private TextBlock TokenWindowPercentText = null!;
-    private Grid TokenWindowTrackRoot = null!;
-    private Border TokenWindowFillBar = null!;
-    private Border TokenWindowSweepBar = null!;
-    private TextBlock TokenWindowText = null!;
+    private StackPanel SessionUsagePanel = null!;
     private TextBlock CreditsTitleText = null!;
     private TextBlock CreditsDetailText = null!;
     private TextBlock ResetCreditDetailsTitleText = null!;
@@ -87,7 +86,8 @@ public sealed partial class MainWindow : Window
     private TextBlock ErrorText = null!;
     private TextBlock CurrentWindowLabelText = null!;
     private TextBlock WeeklyWindowLabelText = null!;
-    private TextBlock TokenWindowLabelText = null!;
+    private TextBlock SessionsLabelText = null!;
+    private Microsoft.UI.Xaml.Controls.Primitives.ToggleButton SessionSortToggleButton = null!;
     private TextBlock AccountLabelText = null!;
     private TextBlock SettingsTitleText = null!;
     private TextBlock RefreshIntervalLabelText = null!;
@@ -106,6 +106,7 @@ public sealed partial class MainWindow : Window
     private TextBox ToggleSidebarHotkeyTextBox = null!;
     private ComboBox LanguageComboBox = null!;
     private Button HomeButton = null!;
+    private Button SessionsButton = null!;
     private Button CreditsButton = null!;
 
     public MainWindow(UsageStore usageStore, SettingsStore settingsStore)
@@ -224,6 +225,10 @@ public sealed partial class MainWindow : Window
         HomeButton.Click += HomeButton_Click;
         SideBarPanel.Children.Add(HomeButton);
 
+        SessionsButton = CreateSideBarButton("\u2637");
+        SessionsButton.Click += SessionsButton_Click;
+        SideBarPanel.Children.Add(SessionsButton);
+
         CreditsButton = CreateSideBarButton("$");
         CreditsButton.Click += CreditsButton_Click;
         SideBarPanel.Children.Add(CreditsButton);
@@ -309,7 +314,7 @@ public sealed partial class MainWindow : Window
         ModelContentPanel = new Grid { RowSpacing = 4 };
         ModelContentTransform = new TranslateTransform();
         ModelContentPanel.RenderTransform = ModelContentTransform;
-        for (var i = 0; i < 9; i++)
+        for (var i = 0; i < 6; i++)
         {
             ModelContentPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         }
@@ -319,7 +324,6 @@ public sealed partial class MainWindow : Window
 
         AddWindowSection(ModelContentPanel, 0, "Current", out CurrentWindowLabelText, out CurrentWindowPercentText, out CurrentWindowTrackRoot, out CurrentWindowFillBar, out CurrentWindowSweepBar, out CurrentWindowText);
         AddWindowSection(ModelContentPanel, 3, "Weekly", out WeeklyWindowLabelText, out WeeklyWindowPercentText, out WeeklyWindowTrackRoot, out WeeklyWindowFillBar, out WeeklyWindowSweepBar, out WeeklyWindowText);
-        AddWindowSection(ModelContentPanel, 6, "Tokens", out TokenWindowLabelText, out TokenWindowPercentText, out TokenWindowTrackRoot, out TokenWindowFillBar, out TokenWindowSweepBar, out TokenWindowText);
 
         AccountText = AddLabelValueRow(hudContent, 3, "Account", out AccountLabelText);
 
@@ -340,9 +344,21 @@ public sealed partial class MainWindow : Window
         };
         Grid.SetRow(hudButtons, 1);
         hudGrid.Children.Add(hudButtons);
-        QuitButton = CreateBackButton("Quit");
-        QuitButton.Click += QuitButton_Click;
+        QuitButton = CreateQuitButton();
         hudButtons.Children.Add(QuitButton);
+
+        SessionsView = new Border
+        {
+            Padding = new Thickness(11, 9, 11, 9),
+            Background = Brush(0xFF, 0x1F, 0x1C, 0x24),
+            BorderBrush = Brush(0x99, 0x7D, 0x62, 0xC7),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(14),
+            Visibility = Visibility.Collapsed
+        };
+        Grid.SetColumn(SessionsView, 1);
+        ContentRootGrid.Children.Add(SessionsView);
+        BuildSessionsView();
 
         CreditsView = new Border
         {
@@ -384,6 +400,107 @@ public sealed partial class MainWindow : Window
         BuildResetCreditDetailsView();
         RootLayout.Children.Add(SideBarHost);
         ApplySideBarProgress();
+    }
+
+    private void BuildSessionsView()
+    {
+        var sessionsRoot = new Grid { RowSpacing = 7 };
+        sessionsRoot.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        sessionsRoot.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        SessionsView.Child = sessionsRoot;
+
+        var scrollViewer = new ScrollViewer
+        {
+            VerticalScrollBarVisibility = ScrollBarVisibility.Hidden,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            VerticalScrollMode = ScrollMode.Auto
+        };
+        AttachTransientScrollBar(scrollViewer);
+        Grid.SetRow(scrollViewer, 0);
+        sessionsRoot.Children.Add(scrollViewer);
+
+        var content = new StackPanel { Spacing = 8 };
+        scrollViewer.Content = content;
+
+        var sessionsTitleRow = new Grid();
+        sessionsTitleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        sessionsTitleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        SessionsLabelText = new TextBlock
+        {
+            Text = "Sessions",
+            FontSize = 16,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        AttachSectionTitleHomeNavigation(SessionsLabelText);
+        sessionsTitleRow.Children.Add(SessionsLabelText);
+
+        SessionSortToggleButton = new Microsoft.UI.Xaml.Controls.Primitives.ToggleButton
+        {
+            Width = 38,
+            Height = 24,
+            MinWidth = 38,
+            MinHeight = 24,
+            Padding = new Thickness(4, 0, 4, 0),
+            FontSize = 10,
+            IsChecked = true,
+            HorizontalAlignment = HorizontalAlignment.Right
+        };
+        Grid.SetColumn(SessionSortToggleButton, 1);
+        sessionsTitleRow.Children.Add(SessionSortToggleButton);
+        content.Children.Add(sessionsTitleRow);
+        content.Children.Add(CreateSectionDivider());
+
+        SessionUsagePanel = new StackPanel { Spacing = 7 };
+        content.Children.Add(SessionUsagePanel);
+        SessionSortToggleButton.Checked += (_, _) => ApplySessionSortPreference();
+        SessionSortToggleButton.Unchecked += (_, _) => ApplySessionSortPreference();
+        UpdateSessionSortToggleAppearance();
+
+        var sessionsButtons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Bottom
+        };
+        Grid.SetRow(sessionsButtons, 1);
+        sessionsRoot.Children.Add(sessionsButtons);
+        sessionsButtons.Children.Add(CreateQuitButton());
+    }
+
+    private void ApplySessionSortPreference()
+    {
+        UpdateSessionSortToggleAppearance();
+        UpdateSessionUsageView(_usageStore.Snapshot?.Sessions);
+    }
+
+    private void UpdateSessionSortToggleAppearance()
+    {
+        var projectFirst = SessionSortToggleButton.IsChecked == true;
+        SessionSortToggleButton.Content = projectFirst ? "P\u2191" : "N\u2191";
+        ToolTipService.SetToolTip(
+            SessionSortToggleButton,
+            projectFirst
+                ? Text("Project sessions first", "\uD504\uB85C\uC81D\uD2B8 \uC138\uC158 \uC6B0\uC120")
+                : Text("Non-project sessions first", "\uBE44\uD504\uB85C\uC81D\uD2B8 \uC138\uC158 \uC6B0\uC120"));
+    }
+
+    private static Border CreateSectionDivider() => new()
+    {
+        Height = 1,
+        Margin = new Thickness(0, 0, 0, 2),
+        Background = Brush(0x88, 0x7D, 0x62, 0xC7),
+        HorizontalAlignment = HorizontalAlignment.Stretch
+    };
+
+    private void AttachSectionTitleHomeNavigation(TextBlock title)
+    {
+        title.PointerPressed += (_, args) =>
+        {
+            ShowHudView();
+            args.Handled = true;
+        };
     }
 
     private static Button CreateTitleButton(Brush background, RoutedEventHandler handler)
@@ -594,22 +711,27 @@ public sealed partial class MainWindow : Window
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         settingsScrollViewer.Content = grid;
         SettingsView.Child = settingsRoot;
 
         SettingsTitleText = new TextBlock
         {
             Text = "Settings",
-            FontSize = 20,
+            FontSize = 16,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
         };
+        AttachSectionTitleHomeNavigation(SettingsTitleText);
         grid.Children.Add(SettingsTitleText);
+        var settingsDivider = CreateSectionDivider();
+        Grid.SetRow(settingsDivider, 1);
+        grid.Children.Add(settingsDivider);
 
         var intervalGrid = new Grid { ColumnSpacing = 8 };
         intervalGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         intervalGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(72) });
         intervalGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        Grid.SetRow(intervalGrid, 1);
+        Grid.SetRow(intervalGrid, 2);
         grid.Children.Add(intervalGrid);
 
         RefreshIntervalLabelText = new TextBlock
@@ -632,7 +754,7 @@ public sealed partial class MainWindow : Window
         var languageGrid = new Grid { ColumnSpacing = 8 };
         languageGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         languageGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(124) });
-        Grid.SetRow(languageGrid, 2);
+        Grid.SetRow(languageGrid, 3);
         grid.Children.Add(languageGrid);
 
         LanguageLabelText = new TextBlock
@@ -654,7 +776,7 @@ public sealed partial class MainWindow : Window
         var hotkeyGrid = new Grid { ColumnSpacing = 8 };
         hotkeyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         hotkeyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(124) });
-        Grid.SetRow(hotkeyGrid, 3);
+        Grid.SetRow(hotkeyGrid, 4);
         grid.Children.Add(hotkeyGrid);
 
         ToggleHotkeyLabelText = new TextBlock
@@ -674,7 +796,7 @@ public sealed partial class MainWindow : Window
         var sidebarHotkeyGrid = new Grid { ColumnSpacing = 8 };
         sidebarHotkeyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         sidebarHotkeyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(124) });
-        Grid.SetRow(sidebarHotkeyGrid, 4);
+        Grid.SetRow(sidebarHotkeyGrid, 5);
         grid.Children.Add(sidebarHotkeyGrid);
 
         ToggleSidebarHotkeyLabelText = new TextBlock
@@ -695,7 +817,7 @@ public sealed partial class MainWindow : Window
         {
             Content = "Start with Windows"
         };
-        Grid.SetRow(StartWithWindowsCheckBox, 5);
+        Grid.SetRow(StartWithWindowsCheckBox, 6);
         grid.Children.Add(StartWithWindowsCheckBox);
 
         AutoShowWithCodexCheckBox = new CheckBox
@@ -704,44 +826,57 @@ public sealed partial class MainWindow : Window
         };
         AutoShowWithCodexCheckBox.Checked += (_, _) => ApplyAutoShowShortcutState();
         AutoShowWithCodexCheckBox.Unchecked += (_, _) => ApplyAutoShowShortcutState();
-        Grid.SetRow(AutoShowWithCodexCheckBox, 6);
+        Grid.SetRow(AutoShowWithCodexCheckBox, 7);
         grid.Children.Add(AutoShowWithCodexCheckBox);
 
-        var buttons = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Spacing = 6
-        };
+        var buttons = new Grid { ColumnSpacing = 6 };
+        buttons.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        buttons.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         Grid.SetRow(buttons, 1);
         settingsRoot.Children.Add(buttons);
         SaveSettingsButton = CreateBackButton("Save");
+        SaveSettingsButton.HorizontalAlignment = HorizontalAlignment.Left;
         SaveSettingsButton.Click += SaveSettingsButton_Click;
         buttons.Children.Add(SaveSettingsButton);
+        var settingsQuitButton = CreateQuitButton();
+        settingsQuitButton.HorizontalAlignment = HorizontalAlignment.Right;
+        Grid.SetColumn(settingsQuitButton, 1);
+        buttons.Children.Add(settingsQuitButton);
     }
 
     private void BuildCreditsView()
     {
         var grid = new Grid { RowSpacing = 10 };
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         CreditsView.Child = grid;
 
         CreditsTitleText = new TextBlock
         {
             Text = "Credits",
-            FontSize = 18,
+            FontSize = 16,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
         };
+        AttachSectionTitleHomeNavigation(CreditsTitleText);
         grid.Children.Add(CreditsTitleText);
+        var creditsDivider = CreateSectionDivider();
+        Grid.SetRow(creditsDivider, 1);
+        grid.Children.Add(creditsDivider);
 
         CreditsDetailText = new TextBlock
         {
             TextWrapping = TextWrapping.Wrap,
             Foreground = Brush(0xFF, 0xED, 0xE7, 0xFF)
         };
-        Grid.SetRow(CreditsDetailText, 1);
+        Grid.SetRow(CreditsDetailText, 2);
         grid.Children.Add(CreditsDetailText);
+
+        var creditsQuitButton = CreateQuitButton();
+        creditsQuitButton.HorizontalAlignment = HorizontalAlignment.Right;
+        Grid.SetRow(creditsQuitButton, 3);
+        grid.Children.Add(creditsQuitButton);
 
     }
 
@@ -750,23 +885,29 @@ public sealed partial class MainWindow : Window
         var grid = new Grid { RowSpacing = 10 };
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         ResetCreditDetailsView.Child = grid;
 
         ResetCreditDetailsTitleText = new TextBlock
         {
             Text = "Credit details",
-            FontSize = 18,
+            FontSize = 16,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
         };
+        AttachSectionTitleHomeNavigation(ResetCreditDetailsTitleText);
         grid.Children.Add(ResetCreditDetailsTitleText);
+        var resetDetailsDivider = CreateSectionDivider();
+        Grid.SetRow(resetDetailsDivider, 1);
+        grid.Children.Add(resetDetailsDivider);
 
         ResetCreditSummaryText = new TextBlock
         {
             TextWrapping = TextWrapping.Wrap,
             Foreground = Brush(0xFF, 0xED, 0xE7, 0xFF)
         };
-        Grid.SetRow(ResetCreditSummaryText, 1);
+        Grid.SetRow(ResetCreditSummaryText, 2);
         grid.Children.Add(ResetCreditSummaryText);
 
         ResetCreditDetailsText = new TextBlock
@@ -775,8 +916,13 @@ public sealed partial class MainWindow : Window
             FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas"),
             Foreground = Brush(0xFF, 0xED, 0xE7, 0xFF)
         };
-        Grid.SetRow(ResetCreditDetailsText, 2);
+        Grid.SetRow(ResetCreditDetailsText, 3);
         grid.Children.Add(ResetCreditDetailsText);
+
+        var resetDetailsQuitButton = CreateQuitButton();
+        resetDetailsQuitButton.HorizontalAlignment = HorizontalAlignment.Right;
+        Grid.SetRow(resetDetailsQuitButton, 4);
+        grid.Children.Add(resetDetailsQuitButton);
 
     }
 
@@ -792,11 +938,20 @@ public sealed partial class MainWindow : Window
         };
     }
 
+    private Button CreateQuitButton()
+    {
+        var button = CreateBackButton("Quit");
+        button.Click += QuitButton_Click;
+        _quitButtons.Add(button);
+        return button;
+    }
+
     private static SolidColorBrush Brush(byte a, byte r, byte g, byte b) =>
         new(global::Windows.UI.Color.FromArgb(a, r, g, b));
 
     public void ShowHudView()
     {
+        SessionsView.Visibility = Visibility.Collapsed;
         CreditsView.Visibility = Visibility.Collapsed;
         SettingsView.Visibility = Visibility.Collapsed;
         ResetCreditDetailsView.Visibility = Visibility.Collapsed;
@@ -809,6 +964,7 @@ public sealed partial class MainWindow : Window
     public void ShowCreditsView()
     {
         HudView.Visibility = Visibility.Collapsed;
+        SessionsView.Visibility = Visibility.Collapsed;
         SettingsView.Visibility = Visibility.Collapsed;
         ResetCreditDetailsView.Visibility = Visibility.Collapsed;
         CreditsView.Visibility = Visibility.Visible;
@@ -827,6 +983,7 @@ public sealed partial class MainWindow : Window
         ApplyAutoShowShortcutState();
         SelectLanguage(_settingsStore.Config.Language);
         HudView.Visibility = Visibility.Collapsed;
+        SessionsView.Visibility = Visibility.Collapsed;
         CreditsView.Visibility = Visibility.Collapsed;
         ResetCreditDetailsView.Visibility = Visibility.Collapsed;
         SettingsView.Visibility = Visibility.Visible;
@@ -837,12 +994,25 @@ public sealed partial class MainWindow : Window
     public void ShowResetCreditDetailsView()
     {
         HudView.Visibility = Visibility.Collapsed;
+        SessionsView.Visibility = Visibility.Collapsed;
         CreditsView.Visibility = Visibility.Collapsed;
         SettingsView.Visibility = Visibility.Collapsed;
         ResetCreditDetailsView.Visibility = Visibility.Visible;
         ApplyLanguage();
         RootLayout.Focus(FocusState.Programmatic);
         UpdateResetCreditDetails(_usageStore.Snapshot?.RateLimitResetCredits);
+    }
+
+    public void ShowSessionsView()
+    {
+        HudView.Visibility = Visibility.Collapsed;
+        CreditsView.Visibility = Visibility.Collapsed;
+        SettingsView.Visibility = Visibility.Collapsed;
+        ResetCreditDetailsView.Visibility = Visibility.Collapsed;
+        SessionsView.Visibility = Visibility.Visible;
+        ApplyLanguage();
+        RootLayout.Focus(FocusState.Programmatic);
+        UpdateSessionUsageView(_usageStore.Snapshot?.Sessions);
     }
 
     private void ConfigureCompactWindow()
@@ -896,7 +1066,6 @@ public sealed partial class MainWindow : Window
         var activeWindowSweep = EaseSweep(_barSweepPhase);
         _currentBarValue = EaseBarValue(_currentBarValue, _targetCurrentBarValue, activeWindowEaseFactor);
         _weeklyBarValue = EaseBarValue(_weeklyBarValue, _targetWeeklyBarValue, activeWindowEaseFactor);
-        _tokenBarValue = EaseBarValue(_tokenBarValue, _targetTokenBarValue, StandardBarEaseFactor);
         ApplyActiveBarProgress(
             CurrentWindowTrackRoot,
             CurrentWindowFillBar,
@@ -911,13 +1080,19 @@ public sealed partial class MainWindow : Window
             _weeklyBarValue,
             _targetWeeklyBarValue,
             activeWindowSweep);
-        ApplyActiveBarProgress(
-            TokenWindowTrackRoot,
-            TokenWindowFillBar,
-            TokenWindowSweepBar,
-            _tokenBarValue,
-            _targetTokenBarValue,
-            activeWindowSweep);
+
+        foreach (var sessionBar in _sessionUsageBars)
+        {
+            sessionBar.CurrentValue = EaseBarValue(sessionBar.CurrentValue, sessionBar.TargetValue, StandardBarEaseFactor);
+            _sessionBarValues[sessionBar.SessionId] = sessionBar.CurrentValue;
+            ApplyActiveBarProgress(
+                sessionBar.TrackRoot,
+                sessionBar.FillBar,
+                sessionBar.SweepBar,
+                sessionBar.CurrentValue,
+                sessionBar.TargetValue,
+                activeWindowSweep);
+        }
     }
 
     private static double EaseBarValue(double current, double target, double factor)
@@ -1042,6 +1217,17 @@ public sealed partial class MainWindow : Window
 
     private void HomeButton_Click(object sender, RoutedEventArgs args) => ShowHudView();
 
+    private void SessionsButton_Click(object sender, RoutedEventArgs args)
+    {
+        if (SessionsView.Visibility == Visibility.Visible)
+        {
+            ShowHudView();
+            return;
+        }
+
+        ShowSessionsView();
+    }
+
     private void TitleText_PointerPressed(object sender, PointerRoutedEventArgs args)
     {
         ToggleSideBar();
@@ -1155,10 +1341,14 @@ public sealed partial class MainWindow : Window
         ApplyWindowSectionLabels();
         AccountLabelText.Text = Text("Account", "\uACC4\uC815");
         SetSideBarButtonText(HomeButton, "\u2302");
+        SetSideBarButtonText(SessionsButton, "\u2637");
         SetSideBarButtonText(CreditsButton, "$");
         SetSideBarButtonText(SettingsButton, "\u2699");
         SetSideBarButtonText(ResetCreditDetailsButton, "\u21BB");
-        QuitButton.Content = Text("Quit", "\uC885\uB8CC");
+        foreach (var quitButton in _quitButtons)
+        {
+            quitButton.Content = Text("Quit", "\uC885\uB8CC");
+        }
         CreditsTitleText.Text = Text("Credits", "\uD06C\uB808\uB527");
         ResetCreditDetailsTitleText.Text = Text("Reset credit details", "\uCD08\uAE30\uD654\uAD8C \uC0C1\uC138");
         SettingsTitleText.Text = Text("Settings", "\uC124\uC815");
@@ -1170,6 +1360,7 @@ public sealed partial class MainWindow : Window
         StartWithWindowsCheckBox.Content = Text("Start with Windows", "Windows \uC2DC\uC791 \uC2DC \uC2E4\uD589");
         AutoShowWithCodexCheckBox.Content = Text("Show only while using ChatGPT or Codex", "ChatGPT \uB610\uB294 Codex \uC0AC\uC6A9 \uC911\uC5D0\uB9CC \uD45C\uC2DC");
         SaveSettingsButton.Content = Text("Save", "\uC800\uC7A5");
+        UpdateSessionSortToggleAppearance();
     }
 
     private string CurrentLanguage => WindexBarConfig.NormalizeLanguage(_settingsStore.Config.Language);
@@ -1184,7 +1375,7 @@ public sealed partial class MainWindow : Window
     {
         CurrentWindowLabelText.Text = WithFastIndicator(Text("Current", "\uD604\uC7AC"));
         WeeklyWindowLabelText.Text = WithFastIndicator(Text("Weekly", "\uC8FC\uAC04"));
-        TokenWindowLabelText.Text = Text("Tokens", "\uD1A0\uD070");
+        SessionsLabelText.Text = Text("Sessions", "\uC138\uC158");
     }
 
     private string WithFastIndicator(string label) =>
@@ -1194,7 +1385,6 @@ public sealed partial class MainWindow : Window
     {
         ApplyProgressBarTheme(CurrentWindowFillBar, CurrentWindowSweepBar, _isFastServiceTier);
         ApplyProgressBarTheme(WeeklyWindowFillBar, WeeklyWindowSweepBar, _isFastServiceTier);
-        ApplyProgressBarTheme(TokenWindowFillBar, TokenWindowSweepBar, isFast: false);
     }
 
     private static void ApplyProgressBarTheme(Border fillBar, Border sweepBar, bool isFast)
@@ -1234,7 +1424,7 @@ public sealed partial class MainWindow : Window
 
         UpdateModelPager();
         ApplyActiveModel();
-        ApplyTokenUsageView(snapshot?.TokenUsage);
+        UpdateSessionUsageView(snapshot?.Sessions);
     }
 
     private void ApplyActiveModel()
@@ -1246,13 +1436,6 @@ public sealed partial class MainWindow : Window
         ModelPageText.Text = string.Empty;
         ApplyWindowView(CurrentWindowPercentText, CurrentWindowText, model?.Current, out _targetCurrentBarValue);
         ApplyWindowView(WeeklyWindowPercentText, WeeklyWindowText, model?.Weekly, out _targetWeeklyBarValue);
-    }
-
-    private void ApplyTokenUsageView(TokenUsageSnapshot? tokenUsage)
-    {
-        TokenWindowPercentText.Text = FormatTokenPercent(tokenUsage);
-        TokenWindowText.Text = FormatTokenUsage(tokenUsage);
-        _targetTokenBarValue = TokenContextPercent(tokenUsage) ?? 0;
     }
 
     private void BuildModelUsages()
@@ -1498,12 +1681,6 @@ public sealed partial class MainWindow : Window
         return IsKorean ? $"{minutes}\uBD84 \uD6C4" : $"in {minutes}m";
     }
 
-    private string FormatTokenPercent(TokenUsageSnapshot? tokenUsage)
-    {
-        var percent = TokenContextPercent(tokenUsage);
-        return percent is null ? UnknownText : $"{percent.Value:0.#}%";
-    }
-
     private string FormatTokenUsage(TokenUsageSnapshot? tokenUsage)
     {
         if (tokenUsage is null)
@@ -1515,7 +1692,9 @@ public sealed partial class MainWindow : Window
         var current = tokenUsage.Last ?? tokenUsage.Total;
         if (current is not null && tokenUsage.ModelContextWindow is { } contextWindow)
         {
-            values.Add($"{Text("Context", "\uCEE8\uD14D\uC2A4\uD2B8")}: {TokenCountFormatter.Format(current.TotalTokens, CurrentLanguage)} / {TokenCountFormatter.Format(contextWindow, CurrentLanguage)}");
+            var percent = TokenContextPercent(tokenUsage);
+            var percentText = percent is null ? string.Empty : $" ({percent.Value:0.#}%)";
+            values.Add($"{Text("Context", "\uCEE8\uD14D\uC2A4\uD2B8")}: {TokenCountFormatter.Format(current.TotalTokens, CurrentLanguage)} / {TokenCountFormatter.Format(contextWindow, CurrentLanguage)}{percentText}");
         }
         else if (current is not null)
         {
@@ -1528,6 +1707,285 @@ public sealed partial class MainWindow : Window
         }
 
         return values.Count == 0 ? UnknownText : string.Join(Environment.NewLine, values);
+    }
+
+    private void UpdateSessionUsageView(IReadOnlyList<CodexSessionUsageSnapshot>? sessions)
+    {
+        foreach (var sessionBar in _sessionUsageBars)
+        {
+            _sessionBarValues[sessionBar.SessionId] = sessionBar.CurrentValue;
+        }
+
+        _sessionUsageBars.Clear();
+        SessionUsagePanel.Children.Clear();
+        if (sessions is null || sessions.Count == 0)
+        {
+            SessionUsagePanel.Children.Add(new TextBlock
+            {
+                Text = Text("No session token usage", "\uC138\uC158 \uD1A0\uD070 \uC0AC\uC6A9\uB7C9 \uC5C6\uC74C"),
+                Foreground = Brush(0xFF, 0xB9, 0xA7, 0xE8),
+                TextWrapping = TextWrapping.Wrap
+            });
+            return;
+        }
+
+        var projectGroups = sessions
+            .GroupBy(session => SessionGroupKey(session.ProjectPath), StringComparer.OrdinalIgnoreCase)
+            .Select(projectGroup =>
+            {
+                var projectSessions = projectGroup.OrderByDescending(item => item.UpdatedAt).ToArray();
+                var projectPath = projectSessions[0].ProjectPath;
+                var isNonProject = string.IsNullOrWhiteSpace(projectPath) || IsDefaultSessionPath(projectPath);
+                return new SessionProjectGroupView(
+                    projectGroup.Key,
+                    SessionProjectDisplayName(projectPath, projectSessions.Length),
+                    isNonProject,
+                    projectSessions);
+            })
+            .ToArray();
+        var projectFirst = SessionSortToggleButton.IsChecked == true;
+        var orderedProjectGroups = projectGroups
+            .OrderBy(group => projectFirst ? (group.IsNonProject ? 1 : 0) : (group.IsNonProject ? 0 : 1))
+            .ThenBy(group => group.ProjectName, StringComparer.CurrentCultureIgnoreCase);
+
+        foreach (var projectGroup in orderedProjectGroups)
+        {
+            var groupKey = projectGroup.Key;
+            var projectSessions = projectGroup.Sessions;
+            var projectName = projectGroup.ProjectName;
+            var isCollapsed = _collapsedSessionGroups.TryGetValue(groupKey, out var collapsed)
+                ? collapsed
+                : true;
+
+            var projectHeaderContent = new Grid();
+            projectHeaderContent.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            projectHeaderContent.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            projectHeaderContent.Children.Add(new TextBlock
+            {
+                Text = $"{projectName} ({projectSessions.Length})",
+                FontSize = 14,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                VerticalAlignment = VerticalAlignment.Center,
+                TextTrimming = TextTrimming.CharacterEllipsis
+            });
+
+            var chevron = new TextBlock
+            {
+                Text = isCollapsed ? "\u25B8" : "\u25BE",
+                FontSize = 14,
+                Margin = new Thickness(8, 0, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = Brush(0xFF, 0xB9, 0xA7, 0xE8)
+            };
+            Grid.SetColumn(chevron, 1);
+            projectHeaderContent.Children.Add(chevron);
+
+            var projectHeader = new Border
+            {
+                Padding = new Thickness(8, 6, 8, 6),
+                Background = Brush(0x66, 0x35, 0x2E, 0x40),
+                BorderBrush = Brush(0x55, 0x7D, 0x62, 0xC7),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(7),
+                Child = projectHeaderContent
+            };
+
+            var sessionCards = new StackPanel
+            {
+                Spacing = 7,
+                Visibility = isCollapsed ? Visibility.Collapsed : Visibility.Visible
+            };
+            projectHeader.PointerPressed += (_, args) =>
+            {
+                var nextCollapsed = sessionCards.Visibility == Visibility.Visible;
+                sessionCards.Visibility = nextCollapsed ? Visibility.Collapsed : Visibility.Visible;
+                chevron.Text = nextCollapsed ? "\u25B8" : "\u25BE";
+                _collapsedSessionGroups[groupKey] = nextCollapsed;
+                args.Handled = true;
+            };
+
+            var projectSection = new StackPanel { Spacing = 6 };
+            projectSection.Children.Add(projectHeader);
+            projectSection.Children.Add(sessionCards);
+            SessionUsagePanel.Children.Add(projectSection);
+
+            foreach (var session in projectSessions)
+            {
+                var cardContent = new StackPanel { Spacing = 3 };
+                cardContent.Children.Add(new TextBlock
+                {
+                    Text = $"[{SessionDisplayName(session)}]",
+                    FontSize = 13,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    TextWrapping = TextWrapping.WrapWholeWords
+                });
+                cardContent.Children.Add(CreateSessionContextHeader(session.TokenUsage));
+                cardContent.Children.Add(CreateSessionContextBar(session.SessionId, session.TokenUsage));
+                cardContent.Children.Add(new TextBlock
+                {
+                    Text = FormatSessionTokenUsageDetails(session.TokenUsage),
+                    FontSize = 11,
+                    Foreground = Brush(0xFF, 0xED, 0xE7, 0xFF),
+                    TextWrapping = TextWrapping.Wrap
+                });
+
+                sessionCards.Children.Add(new Border
+                {
+                    Padding = new Thickness(8, 6, 8, 6),
+                    Background = Brush(0x55, 0x45, 0x3A, 0x56),
+                    BorderBrush = Brush(0x66, 0x7D, 0x62, 0xC7),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(8),
+                    Child = cardContent
+                });
+            }
+        }
+    }
+
+    private Grid CreateSessionContextHeader(TokenUsageSnapshot tokenUsage)
+    {
+        var header = new Grid { Margin = new Thickness(0, 2, 0, 0) };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.Children.Add(new TextBlock
+        {
+            Text = Text("Context", "\uCEE8\uD14D\uC2A4\uD2B8"),
+            FontSize = 12,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+        });
+
+        var percent = TokenContextPercent(tokenUsage);
+        var percentText = new TextBlock
+        {
+            Text = percent is null ? UnknownText : $"{percent.Value:0.#}%",
+            FontSize = 15,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+        };
+        Grid.SetColumn(percentText, 1);
+        header.Children.Add(percentText);
+        return header;
+    }
+
+    private Grid CreateSessionContextBar(string sessionId, TokenUsageSnapshot tokenUsage)
+    {
+        var targetValue = TokenContextPercent(tokenUsage) ?? 0;
+        var currentValue = _sessionBarValues.TryGetValue(sessionId, out var previousValue) ? previousValue : 0;
+        var track = new Grid { Height = 6, Margin = new Thickness(0, 1, 0, 1) };
+        track.Children.Add(new Border
+        {
+            Background = Brush(0xFF, 0x30, 0x28, 0x3A),
+            BorderBrush = Brush(0xFF, 0x5A, 0x4A, 0x74),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(3)
+        });
+
+        var fill = new Border
+        {
+            Background = Brush(0xFF, 0x8D, 0x78, 0xD6),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            CornerRadius = new CornerRadius(3)
+        };
+        track.Children.Add(fill);
+
+        var sweep = new Border
+        {
+            Background = Brush(0xFF, 0xC8, 0xB9, 0xFF),
+            Opacity = 0.3,
+            IsHitTestVisible = false,
+            HorizontalAlignment = HorizontalAlignment.Left
+        };
+        track.Children.Add(sweep);
+        _sessionUsageBars.Add(new SessionUsageBarView(sessionId, track, fill, sweep, currentValue, targetValue));
+        return track;
+    }
+
+    private string FormatSessionTokenUsageDetails(TokenUsageSnapshot tokenUsage)
+    {
+        var values = new List<string>();
+        var current = tokenUsage.Last ?? tokenUsage.Total;
+        if (current is not null && tokenUsage.ModelContextWindow is { } contextWindow)
+        {
+            values.Add($"{TokenCountFormatter.Format(current.TotalTokens, CurrentLanguage)} / {TokenCountFormatter.Format(contextWindow, CurrentLanguage)}");
+        }
+        else if (current is not null)
+        {
+            values.Add(TokenCountFormatter.Format(current.TotalTokens, CurrentLanguage));
+        }
+
+        if (tokenUsage.Total is not null)
+        {
+            values.Add($"{Text("Session total", "\uC138\uC158 \uD569\uACC4")}: {TokenCountFormatter.Format(tokenUsage.Total.TotalTokens, CurrentLanguage)}");
+        }
+
+        return values.Count == 0 ? UnknownText : string.Join(Environment.NewLine, values);
+    }
+
+    private string SessionDisplayName(CodexSessionUsageSnapshot session)
+    {
+        if (!string.IsNullOrWhiteSpace(session.SessionName))
+        {
+            return session.SessionName;
+        }
+
+        var shortId = session.SessionId.Length <= 8 ? session.SessionId : session.SessionId[..8];
+        return $"{Text("Session", "\uC138\uC158")} {shortId}";
+    }
+
+    private string ProjectDisplayName(string? projectPath)
+    {
+        if (string.IsNullOrWhiteSpace(projectPath))
+        {
+            return Text("General session", "\uC77C\uBC18 \uC138\uC158");
+        }
+
+        var normalized = NormalizeProjectPath(projectPath);
+        var name = Path.GetFileName(normalized);
+        return string.IsNullOrWhiteSpace(name) ? normalized : name;
+    }
+
+    private string SessionProjectDisplayName(string? projectPath, int sessionCount)
+    {
+        if (string.IsNullOrWhiteSpace(projectPath))
+        {
+            return Text(sessionCount == 1 ? "General session" : "General sessions", "\uC77C\uBC18 \uC138\uC158");
+        }
+
+        return IsDefaultSessionPath(projectPath) ? "default-session" : ProjectDisplayName(projectPath);
+    }
+
+    private static string NormalizeProjectPath(string? projectPath) =>
+        string.IsNullOrWhiteSpace(projectPath)
+            ? string.Empty
+            : projectPath.Trim().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+    private static string SessionGroupKey(string? projectPath) =>
+        IsDefaultSessionPath(projectPath) ? "default-session" : NormalizeProjectPath(projectPath);
+
+    private static bool IsDefaultSessionPath(string? projectPath)
+    {
+        if (string.IsNullOrWhiteSpace(projectPath))
+        {
+            return false;
+        }
+
+        var normalized = NormalizeProjectPath(projectPath);
+        var folderName = Path.GetFileName(normalized);
+        if (!folderName.StartsWith("new-chat-", StringComparison.OrdinalIgnoreCase)
+            || !int.TryParse(folderName["new-chat-".Length..], out _))
+        {
+            return false;
+        }
+
+        var datePath = Path.GetDirectoryName(normalized);
+        var codexPath = string.IsNullOrWhiteSpace(datePath) ? null : Path.GetDirectoryName(datePath);
+        var dateFolder = string.IsNullOrWhiteSpace(datePath) ? null : Path.GetFileName(datePath);
+        return string.Equals(Path.GetFileName(codexPath), "Codex", StringComparison.OrdinalIgnoreCase)
+            && DateTime.TryParseExact(
+                dateFolder,
+                "yyyy-MM-dd",
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None,
+                out _);
     }
 
     private static double? TokenContextPercent(TokenUsageSnapshot? tokenUsage)
@@ -1562,4 +2020,26 @@ public sealed partial class MainWindow : Window
     }
 
     private sealed record ModelUsageView(string DisplayName, RateWindow? Current, RateWindow? Weekly);
+
+    private sealed record SessionProjectGroupView(
+        string Key,
+        string ProjectName,
+        bool IsNonProject,
+        CodexSessionUsageSnapshot[] Sessions);
+
+    private sealed class SessionUsageBarView(
+        string sessionId,
+        Grid trackRoot,
+        Border fillBar,
+        Border sweepBar,
+        double currentValue,
+        double targetValue)
+    {
+        public string SessionId { get; } = sessionId;
+        public Grid TrackRoot { get; } = trackRoot;
+        public Border FillBar { get; } = fillBar;
+        public Border SweepBar { get; } = sweepBar;
+        public double CurrentValue { get; set; } = currentValue;
+        public double TargetValue { get; } = targetValue;
+    }
 }

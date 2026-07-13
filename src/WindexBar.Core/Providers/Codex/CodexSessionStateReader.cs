@@ -38,7 +38,7 @@ public static class CodexSessionStateReader
             }
 
             var configDefault = ReadConfigDefaults(codexHome);
-            return configDefault is null ? null : new CodexSessionStateSnapshot(configDefault, []);
+            return configDefault is null ? null : new CodexSessionStateSnapshot(configDefault, [], Sessions: []);
         }
         catch (IOException)
         {
@@ -67,6 +67,8 @@ public static class CodexSessionStateReader
         CodexSessionStateSnapshot? latestStateWithActiveModel = null;
         CodexSessionStateSnapshot? latestStateWithLimits = null;
         CodexSessionStateSnapshot? latestStateWithTokenUsage = null;
+        var sessions = new List<CodexSessionUsageSnapshot>();
+        var sessionNames = ReadSessionNames(codexHome);
 
         foreach (var file in Directory.EnumerateFiles(sessionsRoot, "rollout-*.jsonl", options)
                      .Select(path => new FileInfo(path))
@@ -77,6 +79,16 @@ public static class CodexSessionStateReader
             if (state is null || isSubagent)
             {
                 continue;
+            }
+
+            if (state.TokenUsage is { } tokenUsage)
+            {
+                var sessionId = string.IsNullOrWhiteSpace(state.SessionId)
+                    ? Path.GetFileNameWithoutExtension(file.Name)
+                    : state.SessionId;
+                var updatedAt = tokenUsage.UpdatedAt ?? new DateTimeOffset(file.LastWriteTimeUtc, TimeSpan.Zero);
+                sessionNames.TryGetValue(sessionId, out var sessionName);
+                sessions.Add(new CodexSessionUsageSnapshot(sessionId, sessionName, state.ProjectPath, tokenUsage, updatedAt));
             }
 
             if (state.ActiveModel is not null)
@@ -101,7 +113,58 @@ public static class CodexSessionStateReader
             }
         }
 
-        return latestStateWithActiveModel ?? latestStateWithLimits ?? latestStateWithTokenUsage;
+        var latestState = latestStateWithActiveModel ?? latestStateWithLimits ?? latestStateWithTokenUsage;
+        if (latestState is null)
+        {
+            return null;
+        }
+
+        return latestState with
+        {
+            Sessions = sessions
+                .OrderByDescending(session => session.UpdatedAt)
+                .ToArray()
+        };
+    }
+
+    private static IReadOnlyDictionary<string, string> ReadSessionNames(string codexHome)
+    {
+        var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var indexPath = Path.Combine(codexHome, "session_index.jsonl");
+        if (!File.Exists(indexPath))
+        {
+            return names;
+        }
+
+        try
+        {
+            foreach (var line in ReadSharedLines(indexPath))
+            {
+                try
+                {
+                    using var document = JsonDocument.Parse(line);
+                    var root = document.RootElement;
+                    if (TryGetStringAny(root, out var sessionId, "id", "session_id", "sessionId")
+                        && TryGetStringAny(root, out var sessionName, "thread_name", "threadName", "name")
+                        && !string.IsNullOrWhiteSpace(sessionId)
+                        && !string.IsNullOrWhiteSpace(sessionName))
+                    {
+                        names[sessionId] = sessionName.Trim();
+                    }
+                }
+                catch (JsonException)
+                {
+                }
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+
+        return names;
     }
 
     private static CodexSessionStateSnapshot? ReadSessionFile(string path, out bool isSubagent)
@@ -109,6 +172,8 @@ public static class CodexSessionStateReader
         isSubagent = false;
         CodexModelSelection? latestSelection = null;
         TokenUsageSnapshot? latestTokenUsage = null;
+        string? sessionId = null;
+        string? projectPath = null;
         var modelLimits = new List<ModelUsageSnapshot>();
 
         try
@@ -141,6 +206,7 @@ public static class CodexSessionStateReader
                     if (string.Equals(type, "session_meta", StringComparison.OrdinalIgnoreCase))
                     {
                         isSubagent = isSubagent || IsSubagentSession(root);
+                        ReadSessionMetadata(root, ref sessionId, ref projectPath);
                         continue;
                     }
 
@@ -181,20 +247,44 @@ public static class CodexSessionStateReader
         }
         catch (IOException)
         {
-            return latestSelection is null && modelLimits.Count == 0 && latestTokenUsage is null
-                ? null
-                : new CodexSessionStateSnapshot(latestSelection, modelLimits, latestTokenUsage);
+            return CreateSessionState(latestSelection, modelLimits, latestTokenUsage, sessionId, projectPath);
         }
         catch (UnauthorizedAccessException)
         {
-            return latestSelection is null && modelLimits.Count == 0 && latestTokenUsage is null
-                ? null
-                : new CodexSessionStateSnapshot(latestSelection, modelLimits, latestTokenUsage);
+            return CreateSessionState(latestSelection, modelLimits, latestTokenUsage, sessionId, projectPath);
         }
 
-        return latestSelection is null && modelLimits.Count == 0 && latestTokenUsage is null
+        return CreateSessionState(latestSelection, modelLimits, latestTokenUsage, sessionId, projectPath);
+    }
+
+    private static CodexSessionStateSnapshot? CreateSessionState(
+        CodexModelSelection? activeModel,
+        IReadOnlyList<ModelUsageSnapshot> models,
+        TokenUsageSnapshot? tokenUsage,
+        string? sessionId,
+        string? projectPath)
+    {
+        return activeModel is null && models.Count == 0 && tokenUsage is null
             ? null
-            : new CodexSessionStateSnapshot(latestSelection, modelLimits, latestTokenUsage);
+            : new CodexSessionStateSnapshot(activeModel, models, tokenUsage, sessionId, projectPath);
+    }
+
+    private static void ReadSessionMetadata(JsonElement root, ref string? sessionId, ref string? projectPath)
+    {
+        if (!root.TryGetProperty("payload", out var payload))
+        {
+            return;
+        }
+
+        if (TryGetStringAny(payload, out var parsedSessionId, "session_id", "sessionId", "id"))
+        {
+            sessionId = parsedSessionId;
+        }
+
+        if (TryGetStringAny(payload, out var parsedProjectPath, "cwd", "project_path", "projectPath"))
+        {
+            projectPath = parsedProjectPath;
+        }
     }
 
     private static bool ContainsToken(string value, string token) =>
@@ -907,4 +997,7 @@ public static class CodexSessionStateReader
 public sealed record CodexSessionStateSnapshot(
     CodexModelSelection? ActiveModel,
     IReadOnlyList<ModelUsageSnapshot> Models,
-    TokenUsageSnapshot? TokenUsage = null);
+    TokenUsageSnapshot? TokenUsage = null,
+    string? SessionId = null,
+    string? ProjectPath = null,
+    IReadOnlyList<CodexSessionUsageSnapshot>? Sessions = null);

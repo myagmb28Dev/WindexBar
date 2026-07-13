@@ -296,7 +296,6 @@ public sealed class TrayIconService : IDisposable
         {
             TryShowWindow(window =>
             {
-                window.ShowHudView();
                 var status = WindowCloseBehavior.ShowPassive(window);
                 LogMessage($"WindexBar window auto-shown for {status}.");
             });

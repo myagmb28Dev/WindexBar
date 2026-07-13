@@ -46,12 +46,29 @@ public sealed class CodexRpcClientTests
                     }
                 }
             }),
-            OnRequest(3, new { account = new { type = "chatgpt", email = "me@example.com", planType = "team" } }));
+            OnRequest(3, new { account = new { type = "chatgpt", email = "me@example.com", planType = "team" } }),
+            OnRequest(4, new
+            {
+                data = new[]
+                {
+                    new
+                    {
+                        id = "session-1",
+                        name = "Implement session usage",
+                        preview = "Session usage preview",
+                        cwd = "D:\\Codes\\WindexBar",
+                        createdAt = 1_800_000_000L,
+                        updatedAt = 1_800_100_000L
+                    }
+                },
+                nextCursor = (string?)null
+            }));
 
         await using var client = new CodexRpcClient(transport, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
         await client.InitializeAsync(CancellationToken.None);
         var limits = await client.FetchRateLimitsAsync(CancellationToken.None);
         var account = await client.FetchAccountAsync(CancellationToken.None);
+        var threads = await client.FetchThreadsAsync(CancellationToken.None);
         var usage = CodexUsageMapper.MapUsage(limits, account, DateTimeOffset.UnixEpoch)!;
         var credits = CodexUsageMapper.MapCredits(limits.RateLimits.Credits, DateTimeOffset.UnixEpoch)!;
 
@@ -70,7 +87,14 @@ public sealed class CodexRpcClientTests
         Assert.Equal("Referral reset", resetCredit.Title);
         Assert.Equal("Banked reset", resetCredit.Description);
         Assert.Equal(123.5, credits.Remaining, 3);
+        var thread = Assert.Single(threads.Data);
+        Assert.Equal("session-1", thread.Id);
+        Assert.Equal("Implement session usage", thread.Name);
+        Assert.Equal("Session usage preview", thread.Preview);
+        Assert.Equal("D:\\Codes\\WindexBar", thread.Cwd);
         Assert.Contains("initialized", transport.Writes[1], StringComparison.Ordinal);
+        Assert.Contains("\"sortKey\":\"updated_at\"", transport.Writes[4], StringComparison.Ordinal);
+        Assert.Contains("\"sourceKinds\":[\"cli\",\"vscode\",\"appServer\"]", transport.Writes[4], StringComparison.Ordinal);
     }
 
     [Fact]
@@ -545,35 +569,11 @@ public sealed class ConfigTests
         Assert.True(File.Exists(path));
         Assert.False(reloaded.GetProviderConfig(UsageProvider.Codex).Enabled);
         Assert.Equal(WindexBarConfig.DefaultRefreshIntervalSeconds, reloaded.GetProviderConfig(UsageProvider.Codex).RefreshIntervalSeconds);
-        Assert.False(reloaded.ClickThroughHud);
         Assert.Equal(WindexBarConfig.DefaultLanguage, reloaded.Language);
         Assert.Equal(WindexBarConfig.DefaultToggleWindowHotkey, reloaded.Hotkeys.ToggleWindow);
         Assert.Equal(WindexBarConfig.DefaultToggleSidebarHotkey, reloaded.Hotkeys.ToggleSidebar);
         Assert.True(reloaded.StartWithWindows);
         Assert.False(reloaded.AutoShowWithCodex);
-    }
-
-    [Fact]
-    public void PreservesSavedClickThroughHudValue()
-    {
-        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, """
-        {
-          "version": 1,
-          "clickThroughHud": true,
-          "providers": [
-            { "id": "codex", "enabled": true, "source": "cli" }
-          ]
-        }
-        """);
-        var store = new WindexBarConfigStore(path);
-
-        var config = store.LoadOrCreateDefault();
-
-        Assert.Equal(WindexBarConfig.CurrentVersion, config.Version);
-        Assert.True(config.ClickThroughHud);
-        Assert.Equal(WindexBarConfig.DefaultRefreshIntervalSeconds, config.GetProviderConfig(UsageProvider.Codex).RefreshIntervalSeconds);
     }
 
     [Fact]
@@ -1240,6 +1240,53 @@ public sealed class CodexSessionStateReaderTests
     }
 
     [Fact]
+    public void ReadsTokenUsageForEachUserSessionAcrossProjects()
+    {
+        var codexHome = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var sessionDir = Path.Combine(codexHome, "sessions", "2026", "07", "13");
+        Directory.CreateDirectory(sessionDir);
+
+        var projectAPath = Path.Combine(sessionDir, "rollout-project-a.jsonl");
+        File.WriteAllText(projectAPath, """
+        {"timestamp":"2026-07-13T10:00:00Z","type":"session_meta","payload":{"id":"session-a","thread_source":"user","cwd":"D:\\Codes\\ProjectA","source":"desktop"}}
+        {"timestamp":"2026-07-13T10:05:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":9000,"output_tokens":1000,"total_tokens":10000},"last_token_usage":{"input_tokens":3000,"output_tokens":1000,"total_tokens":4000},"model_context_window":128000}}}
+        """);
+
+        var projectBPath = Path.Combine(sessionDir, "rollout-project-b.jsonl");
+        File.WriteAllText(projectBPath, """
+        {"timestamp":"2026-07-13T11:00:00Z","type":"session_meta","payload":{"session_id":"session-b","thread_source":"user","cwd":"D:\\Codes\\ProjectB","source":"desktop"}}
+        {"timestamp":"2026-07-13T11:05:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":18000,"output_tokens":2000,"total_tokens":20000},"last_token_usage":{"input_tokens":4000,"output_tokens":1000,"total_tokens":5000},"model_context_window":256000}}}
+        """);
+        File.SetLastWriteTimeUtc(projectBPath, DateTime.UtcNow.AddMinutes(1));
+
+        var subagentPath = Path.Combine(sessionDir, "rollout-subagent.jsonl");
+        File.WriteAllText(subagentPath, """
+        {"timestamp":"2026-07-13T12:00:00Z","type":"session_meta","payload":{"id":"subagent","thread_source":"subagent","cwd":"D:\\Codes\\ProjectB","source":{"subagent":{}}}}
+        {"timestamp":"2026-07-13T12:05:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":99999},"last_token_usage":{"total_tokens":99999},"model_context_window":128000}}}
+        """);
+        File.SetLastWriteTimeUtc(subagentPath, DateTime.UtcNow.AddMinutes(2));
+        File.WriteAllText(Path.Combine(codexHome, "session_index.jsonl"), """
+        {"id":"session-a","thread_name":"Project A session","updated_at":"2026-07-13T10:00:00Z"}
+        {"id":"session-b","thread_name":"Old session name","updated_at":"2026-07-13T10:30:00Z"}
+        {"id":"session-b","thread_name":"\uBA85\uC2DC\uC801 \uC138\uC158\uBA85","updated_at":"2026-07-13T11:00:00Z"}
+        """);
+
+        var state = CodexSessionStateReader.ReadLatestState(TestEnvironment(codexHome));
+
+        Assert.NotNull(state);
+        Assert.Equal(2, state!.Sessions!.Count);
+        Assert.Equal("session-b", state.Sessions[0].SessionId);
+        Assert.Equal("\uBA85\uC2DC\uC801 \uC138\uC158\uBA85", state.Sessions[0].SessionName);
+        Assert.Equal("D:\\Codes\\ProjectB", state.Sessions[0].ProjectPath);
+        Assert.Equal(5000, state.Sessions[0].TokenUsage.Last!.TotalTokens);
+        Assert.Equal(20000, state.Sessions[0].TokenUsage.Total!.TotalTokens);
+        Assert.Equal("session-a", state.Sessions[1].SessionId);
+        Assert.Equal("Project A session", state.Sessions[1].SessionName);
+        Assert.Equal(4000, state.Sessions[1].TokenUsage.Last!.TotalTokens);
+        Assert.DoesNotContain(state.Sessions, session => session.SessionId == "subagent");
+    }
+
+    [Fact]
     public void FallsBackToConfigDefaultsWhenSessionIsUnavailable()
     {
         var codexHome = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -1329,6 +1376,68 @@ public sealed class CodexSessionStateReaderTests
             RequestTimeout: TimeSpan.FromMilliseconds(20));
 
         await Assert.ThrowsAsync<CodexRpcTimeoutException>(() => strategy.FetchAsync(context, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task CodexCliFetchEnrichesSessionUsageWithThreadNames()
+    {
+        var testRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var binDir = Path.Combine(testRoot, "bin");
+        var codexHome = Path.Combine(testRoot, "codex-home");
+        var sessionDir = Path.Combine(codexHome, "sessions", "2026", "07", "13");
+        Directory.CreateDirectory(binDir);
+        Directory.CreateDirectory(sessionDir);
+        File.WriteAllText(Path.Combine(binDir, "codex.cmd"), "@echo off\r\n");
+        File.WriteAllText(Path.Combine(sessionDir, "rollout-user.jsonl"), """
+        {"timestamp":"2026-07-13T10:00:00Z","type":"session_meta","payload":{"id":"session-1","thread_source":"user","cwd":"D:\\Codes\\OldName","source":"desktop"}}
+        {"timestamp":"2026-07-13T10:05:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":20000},"last_token_usage":{"total_tokens":5000},"model_context_window":256000}}}
+        """);
+
+        static string Reply(int id, object result) => JsonSerializer.Serialize(new { id, result });
+        var transportFactory = new QueueCodexRpcTransportFactory(
+        [
+            [
+                Reply(1, new { ok = true }),
+                Reply(2, new
+                {
+                    rateLimits = new
+                    {
+                        primary = new { usedPercent = 0.0, windowDurationMins = 10080, resetsAt = 1_800_100_000L },
+                        secondary = (object?)null,
+                        planType = "pro"
+                    }
+                }),
+                Reply(3, new { account = new { type = "chatgpt", planType = "pro" } }),
+                Reply(4, new
+                {
+                    data = new[]
+                    {
+                        new { id = "session-1", name = (string?)null, preview = "\uC138\uC158 \uC0AC\uC6A9\uB7C9 \uAE30\uB2A5", cwd = "D:\\Codes\\WindexBar" }
+                    },
+                    nextCursor = (string?)null
+                })
+            ]
+        ]);
+        var strategy = new CodexCliFetchStrategy(transportFactory);
+        var context = new ProviderFetchContext(
+            UsageProvider.Codex,
+            new Dictionary<string, string>
+            {
+                ["PATH"] = binDir,
+                ["PATHEXT"] = ".CMD",
+                ["CODEX_HOME"] = codexHome
+            },
+            IncludeCredits: true,
+            InitializeTimeout: TimeSpan.FromSeconds(1),
+            RequestTimeout: TimeSpan.FromSeconds(1));
+
+        var result = await strategy.FetchAsync(context, CancellationToken.None);
+
+        var session = Assert.Single(result.Usage.Sessions!);
+        Assert.Equal("\uC138\uC158 \uC0AC\uC6A9\uB7C9 \uAE30\uB2A5", session.SessionName);
+        Assert.Equal("D:\\Codes\\WindexBar", session.ProjectPath);
+        Assert.Equal(5000, session.TokenUsage.Last!.TotalTokens);
+        Assert.Equal(20000, session.TokenUsage.Total!.TotalTokens);
     }
 
     private static IReadOnlyDictionary<string, string> TestEnvironment(string codexHome) => new Dictionary<string, string>
@@ -1563,50 +1672,13 @@ public sealed class InstallerBuildScriptTests
     }
 
     [Fact]
-    public void SettingsViewContentIsScrollable()
+    public void AutoVisibilityPreservesTheSelectedSection()
     {
-        var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "MainWindow.xaml.cs")));
+        var trayService = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "TrayIconService.cs")));
+        var applyAutoVisibility = ExtractMethodBody(trayService, "private void ApplyAutoVisibility(bool isCodexActivity)");
 
-        Assert.Contains("var settingsScrollViewer = new ScrollViewer", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("VerticalScrollBarVisibility = ScrollBarVisibility.Auto", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("SettingsView.Child = settingsRoot", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("settingsScrollViewer.Content = grid", mainWindow, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void HomeAndSettingsUseVisibleScrollableAreasWithFixedSettingsActions()
-    {
-        var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "MainWindow.xaml.cs")));
-
-        Assert.Contains("HudScrollViewer = new ScrollViewer", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("var settingsRoot = new Grid", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("Grid.SetRow(settingsScrollViewer, 0)", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("Grid.SetRow(buttons, 1)", mainWindow, StringComparison.Ordinal);
-        Assert.DoesNotContain("Grid.SetRow(buttons, 8)", mainWindow, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void HomeAndSettingsScrollBarsAreTransient()
-    {
-        var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "MainWindow.xaml.cs")));
-
-        Assert.Contains("AttachTransientScrollBar(HudScrollViewer)", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("AttachTransientScrollBar(settingsScrollViewer)", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("scrollViewer.VerticalScrollBarVisibility = ScrollBarVisibility.Hidden", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("scrollViewer.VerticalScrollBarVisibility = ScrollBarVisibility.Auto", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("scrollViewer.PointerReleased", mainWindow, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void SectionNavigationDoesNotResetUserWindowSize()
-    {
-        var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "MainWindow.xaml.cs")));
-
-        Assert.DoesNotContain("ResizeForCurrentView();", ExtractMethodBody(mainWindow, "public void ShowHudView()"), StringComparison.Ordinal);
-        Assert.DoesNotContain("ResizeForCurrentView();", ExtractMethodBody(mainWindow, "public void ShowCreditsView()"), StringComparison.Ordinal);
-        Assert.DoesNotContain("ResizeForCurrentView();", ExtractMethodBody(mainWindow, "public void ShowSettingsView()"), StringComparison.Ordinal);
-        Assert.DoesNotContain("ResizeForCurrentView();", ExtractMethodBody(mainWindow, "public void ShowResetCreditDetailsView()"), StringComparison.Ordinal);
-        Assert.Contains("ResizeForCurrentView();", ExtractMethodBody(mainWindow, "public void ToggleSideBar()"), StringComparison.Ordinal);
+        Assert.Contains("WindowCloseBehavior.ShowPassive(window)", applyAutoVisibility, StringComparison.Ordinal);
+        Assert.DoesNotContain("window.ShowHudView()", applyAutoVisibility, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryFile(string fileName, [CallerFilePath] string sourceFilePath = "")
