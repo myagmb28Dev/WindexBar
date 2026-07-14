@@ -284,14 +284,14 @@ jobs:
     needs: release
     runs-on: windows-latest
     env:
-      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+      WINGET_CREATE_GITHUB_TOKEN: ${{ secrets.WINGET_TOKEN }}
 
     steps:
       - name: Check WinGet submission configuration
         id: winget
         shell: pwsh
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:WINGET_TOKEN)) {
+          if ([string]::IsNullOrWhiteSpace($env:WINGET_CREATE_GITHUB_TOKEN)) {
             Write-Warning 'WINGET_TOKEN is not configured. Skipping the WinGet update submission.'
             'enabled=false' >> $env:GITHUB_OUTPUT
             '### WinGet submission skipped' >> $env:GITHUB_STEP_SUMMARY
@@ -329,7 +329,6 @@ jobs:
             '--prtitle', "New version: myagmb28Dev.WindexBar version $env:RELEASE_VERSION"
             '--submit'
             '--no-open'
-            '--token', $env:WINGET_TOKEN
           )
 
           & $toolPath @arguments
