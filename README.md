@@ -96,3 +96,7 @@ Test:
 ```powershell
 dotnet test .\tests\WindexBar.Core.Tests\WindexBar.Core.Tests.csproj -p:NuGetAudit=false
 ```
+
+## License
+
+MIT. See [LICENSE](LICENSE).
