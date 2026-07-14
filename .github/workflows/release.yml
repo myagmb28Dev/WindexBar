@@ -15,8 +15,6 @@ concurrency:
 env:
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
-  WINDOWS_CODESIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
-  WINDOWS_CODESIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PFX_PASSWORD }}
 
 jobs:
   release:
@@ -53,10 +51,12 @@ jobs:
 
       - name: Import code signing certificate
         shell: pwsh
+        env:
+          WINDOWS_CODESIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
+          WINDOWS_CODESIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PFX_PASSWORD }}
         run: |
           if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_PFX_BASE64)) {
-            Write-Warning 'WINDOWS_CODESIGN_PFX_BASE64 is not set. Installer will be built without a CI-provided signing certificate.'
-            return
+            throw 'WINDOWS_CODESIGN_PFX_BASE64 is required for public releases.'
           }
 
           $pfxPath = Join-Path $env:RUNNER_TEMP 'windexbar-codesign.pfx'
@@ -69,8 +69,11 @@ jobs:
             $password = ConvertTo-SecureString $env:WINDOWS_CODESIGN_PFX_PASSWORD -AsPlainText -Force
           }
 
-          Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\CurrentUser\My -Password $password | Out-Null
-          Remove-Item -LiteralPath $pfxPath -Force
+          try {
+            Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\CurrentUser\My -Password $password | Out-Null
+          } finally {
+            Remove-Item -LiteralPath $pfxPath -Force -ErrorAction SilentlyContinue
+          }
 
       - name: Restore
         shell: pwsh
@@ -107,6 +110,10 @@ jobs:
 
           $hash = (Get-FileHash -Path $installer.FullName -Algorithm SHA256).Hash
           $signature = Get-AuthenticodeSignature -FilePath $installer.FullName
+
+          if ($signature.Status -ne 'Valid') {
+            throw "Release installer must have a valid Authenticode signature. Status: $($signature.Status). $($signature.StatusMessage)"
+          }
 
           "path=$($installer.FullName)" >> $env:GITHUB_OUTPUT
           "sha256=$hash" >> $env:GITHUB_OUTPUT
@@ -256,6 +263,12 @@ jobs:
           $releaseExists = $LASTEXITCODE -eq 0
 
           if ($releaseExists) {
+            $assetNames = @(gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets --jq '.assets[].name')
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            if ($assetNames -contains 'WindexBarSetup.exe') {
+              throw "WindexBarSetup.exe already exists for $tag. Published release assets are immutable; create a new version instead."
+            }
+
             gh release edit $tag --repo $env:GITHUB_REPOSITORY --title "WindexBar $version" --notes-file "$notesPath" --draft=false
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           } else {
@@ -263,5 +276,5 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
-          gh release upload $tag "$installer#WindexBarSetup.exe" --repo $env:GITHUB_REPOSITORY --clobber
+          gh release upload $tag "$installer#WindexBarSetup.exe" --repo $env:GITHUB_REPOSITORY
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
