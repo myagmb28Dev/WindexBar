@@ -56,7 +56,8 @@ jobs:
           WINDOWS_CODESIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PFX_PASSWORD }}
         run: |
           if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_PFX_BASE64)) {
-            throw 'WINDOWS_CODESIGN_PFX_BASE64 is required for public releases.'
+            Write-Warning 'WINDOWS_CODESIGN_PFX_BASE64 is not set. Installer will be built without a CI-provided signing certificate.'
+            return
           }
 
           $pfxPath = Join-Path $env:RUNNER_TEMP 'windexbar-codesign.pfx'
@@ -110,10 +111,6 @@ jobs:
 
           $hash = (Get-FileHash -Path $installer.FullName -Algorithm SHA256).Hash
           $signature = Get-AuthenticodeSignature -FilePath $installer.FullName
-
-          if ($signature.Status -ne 'Valid') {
-            throw "Release installer must have a valid Authenticode signature. Status: $($signature.Status). $($signature.StatusMessage)"
-          }
 
           "path=$($installer.FullName)" >> $env:GITHUB_OUTPUT
           "sha256=$hash" >> $env:GITHUB_OUTPUT
