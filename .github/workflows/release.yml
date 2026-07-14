@@ -19,6 +19,9 @@ env:
 jobs:
   release:
     runs-on: windows-latest
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
 
     steps:
       - name: Check out repository
@@ -274,4 +277,59 @@ jobs:
           }
 
           gh release upload $tag "$installer#WindexBarSetup.exe" --repo $env:GITHUB_REPOSITORY
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  submit-winget:
+    name: Submit WinGet update
+    needs: release
+    runs-on: windows-latest
+    env:
+      WINGET_CREATE_GITHUB_TOKEN: ${{ secrets.WINGET_TOKEN }}
+
+    steps:
+      - name: Check WinGet submission configuration
+        id: winget
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINGET_CREATE_GITHUB_TOKEN)) {
+            Write-Warning 'WINGET_TOKEN is not configured. Skipping the WinGet update submission.'
+            'enabled=false' >> $env:GITHUB_OUTPUT
+            '### WinGet submission skipped' >> $env:GITHUB_STEP_SUMMARY
+            'Add the `WINGET_TOKEN` repository secret before the next release to enable automatic update PRs.' >> $env:GITHUB_STEP_SUMMARY
+            return
+          }
+
+          'enabled=true' >> $env:GITHUB_OUTPUT
+
+      - name: Download WinGetCreate
+        if: steps.winget.outputs.enabled == 'true'
+        shell: pwsh
+        run: |
+          $toolPath = Join-Path $env:RUNNER_TEMP 'wingetcreate.exe'
+          Invoke-WebRequest -Uri 'https://aka.ms/wingetcreate/latest' -OutFile $toolPath
+
+      - name: Submit WinGet update
+        if: steps.winget.outputs.enabled == 'true'
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ needs.release.outputs.version }}
+          RELEASE_TAG: ${{ needs.release.outputs.tag }}
+        run: |
+          $toolPath = Join-Path $env:RUNNER_TEMP 'wingetcreate.exe'
+          $installerUrl = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:RELEASE_TAG/WindexBarSetup.exe"
+          $releaseNotesUrl = "https://github.com/$env:GITHUB_REPOSITORY/releases/tag/$env:RELEASE_TAG"
+          $releaseDate = Get-Date -AsUTC -Format 'yyyy-MM-dd'
+          $arguments = @(
+            'update'
+            'myagmb28Dev.WindexBar'
+            '--urls', $installerUrl
+            '--version', $env:RELEASE_VERSION
+            '--release-notes-url', $releaseNotesUrl
+            '--release-date', $releaseDate
+            '--prtitle', "New version: myagmb28Dev.WindexBar version $env:RELEASE_VERSION"
+            '--submit'
+            '--no-open'
+          )
+
+          & $toolPath @arguments
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
