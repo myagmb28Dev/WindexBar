@@ -93,8 +93,34 @@ public sealed class CodexRpcClientTests
         Assert.Equal("Session usage preview", thread.Preview);
         Assert.Equal("D:\\Codes\\WindexBar", thread.Cwd);
         Assert.Contains("initialized", transport.Writes[1], StringComparison.Ordinal);
+        Assert.Contains("\"useStateDbOnly\":true", transport.Writes[4], StringComparison.Ordinal);
         Assert.Contains("\"sortKey\":\"updated_at\"", transport.Writes[4], StringComparison.Ordinal);
-        Assert.Contains("\"sourceKinds\":[\"cli\",\"vscode\",\"appServer\"]", transport.Writes[4], StringComparison.Ordinal);
+        Assert.DoesNotContain("sourceKinds", transport.Writes[4], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FetchesEveryThreadListPage()
+    {
+        var transport = new FakeCodexRpcTransport(
+            OnRequest(1, new { ok = true }),
+            OnRequest(2, new
+            {
+                data = new[] { new { id = "session-1" } },
+                nextCursor = "next-page"
+            }),
+            OnRequest(3, new
+            {
+                data = new[] { new { id = "session-2" } },
+                nextCursor = (string?)null
+            }));
+
+        await using var client = new CodexRpcClient(transport, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        await client.InitializeAsync(CancellationToken.None);
+
+        var threads = await client.FetchThreadsAsync(CancellationToken.None);
+
+        Assert.Equal(["session-1", "session-2"], threads.Data.Select(thread => thread.Id));
+        Assert.Contains("\"cursor\":\"next-page\"", transport.Writes[3], StringComparison.Ordinal);
     }
 
     [Fact]
@@ -814,6 +840,39 @@ public sealed class CodexActivityWindowMatcherTests
     }
 
     [Fact]
+    public void MatchesTerminalWhenCodexRunsOutsideWindowProcessTree()
+    {
+        var window = new CodexActivityWindowSnapshot("WindowsTerminal", "PowerShell", [], HasTerminalCodexProcess: true);
+
+        Assert.True(CodexActivityWindowMatcher.IsCodexActivity(window));
+    }
+
+    [Fact]
+    public void FindsCodexCliWithTerminalShellAncestor()
+    {
+        CodexActivityProcessSnapshot[] processes =
+        [
+            new(10, 1, "cmd.exe"),
+            new(11, 10, "node.exe"),
+            new(12, 11, "codex.exe")
+        ];
+
+        Assert.True(CodexActivityWindowMatcher.HasTerminalCodexProcess(processes));
+    }
+
+    [Fact]
+    public void IgnoresCodexProcessOwnedByDesktopApp()
+    {
+        CodexActivityProcessSnapshot[] processes =
+        [
+            new(20, 1, "ChatGPT.exe"),
+            new(21, 20, "codex.exe")
+        ];
+
+        Assert.False(CodexActivityWindowMatcher.HasTerminalCodexProcess(processes));
+    }
+
+    [Fact]
     public void MatchesTerminalTitleFallback()
     {
         var window = new CodexActivityWindowSnapshot("pwsh", "codex app-server", []);
@@ -859,6 +918,25 @@ public sealed class AutoVisibilityPolicyTests
     public void OnlyShowsForEnabledCodexActivityWhenUserDidNotHide(bool enabled, bool codexActivity, bool userHidden, bool expected)
     {
         Assert.Equal(expected, AutoVisibilityPolicy.ShouldShow(enabled, codexActivity, userHidden));
+    }
+
+    [Theory]
+    [InlineData(true, true, false, true)]
+    [InlineData(false, true, false, false)]
+    [InlineData(true, false, false, false)]
+    [InlineData(true, true, true, false)]
+    public void PreservesOwnWindowFocusOnlyWhilePreviousCodexWindowRemainsAvailable(
+        bool hasPreviousCodexWindow,
+        bool previousCodexWindowVisible,
+        bool previousCodexWindowMinimized,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            AutoVisibilityPolicy.ShouldPreserveWhileOwnWindowFocused(
+                hasPreviousCodexWindow,
+                previousCodexWindowVisible,
+                previousCodexWindowMinimized));
     }
 
     [Fact]
@@ -1414,7 +1492,7 @@ public sealed class CodexSessionStateReaderTests
                 {
                     data = new[]
                     {
-                        new { id = "session-1", name = (string?)null, preview = "\uC138\uC158 \uC0AC\uC6A9\uB7C9 \uAE30\uB2A5", cwd = "D:\\Codes\\WindexBar" }
+                        new { id = "session-1", name = (string?)null, preview = "\uC138\uC158 \uC0AC\uC6A9\uB7C9 \uAE30\uB2A5", cwd = codexHome }
                     },
                     nextCursor = (string?)null
                 })
@@ -1437,9 +1515,178 @@ public sealed class CodexSessionStateReaderTests
 
         var session = Assert.Single(result.Usage.Sessions!);
         Assert.Equal("\uC138\uC158 \uC0AC\uC6A9\uB7C9 \uAE30\uB2A5", session.SessionName);
-        Assert.Equal("D:\\Codes\\WindexBar", session.ProjectPath);
+        Assert.Equal(codexHome, session.ProjectPath);
         Assert.Equal(5000, session.TokenUsage.Last!.TotalTokens);
         Assert.Equal(20000, session.TokenUsage.Total!.TotalTokens);
+    }
+
+    [Fact]
+    public async Task CodexCliFetchExcludesDeletedAndUnavailableProjectSessions()
+    {
+        var testRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var binDir = Path.Combine(testRoot, "bin");
+        var codexHome = Path.Combine(testRoot, "codex-home");
+        var sessionDir = Path.Combine(codexHome, "sessions", "2026", "07", "16");
+        var activeProject = Path.Combine(testRoot, "active-project");
+        var staleProject = Path.Combine(testRoot, "stale-project");
+        var missingProject = Path.Combine(testRoot, "missing-project");
+        Directory.CreateDirectory(binDir);
+        Directory.CreateDirectory(sessionDir);
+        Directory.CreateDirectory(activeProject);
+        Directory.CreateDirectory(staleProject);
+        File.WriteAllText(Path.Combine(binDir, "codex.cmd"), "@echo off\r\n");
+
+        static void WriteSession(string path, string sessionId, string projectPath, long totalTokens)
+        {
+            var metadata = JsonSerializer.Serialize(new
+            {
+                timestamp = "2026-07-16T10:00:00Z",
+                type = "session_meta",
+                payload = new { id = sessionId, thread_source = "user", cwd = projectPath, source = "desktop" }
+            });
+            var usage = JsonSerializer.Serialize(new
+            {
+                timestamp = "2026-07-16T10:05:00Z",
+                type = "event_msg",
+                payload = new
+                {
+                    type = "token_count",
+                    info = new
+                    {
+                        total_token_usage = new { total_tokens = totalTokens },
+                        last_token_usage = new { total_tokens = totalTokens / 2 },
+                        model_context_window = 256000
+                    }
+                }
+            });
+            File.WriteAllLines(path, [metadata, usage]);
+        }
+
+        WriteSession(Path.Combine(sessionDir, "rollout-active.jsonl"), "active-session", activeProject, 30_000);
+        WriteSession(Path.Combine(sessionDir, "rollout-stale.jsonl"), "stale-session", staleProject, 20_000);
+        WriteSession(Path.Combine(sessionDir, "rollout-missing.jsonl"), "missing-session", missingProject, 10_000);
+
+        static string Reply(int id, object result) => JsonSerializer.Serialize(new { id, result });
+        var transportFactory = new QueueCodexRpcTransportFactory(
+        [
+            [
+                Reply(1, new { ok = true }),
+                Reply(2, new
+                {
+                    rateLimits = new
+                    {
+                        primary = new { usedPercent = 0.0, windowDurationMins = 10080, resetsAt = 1_800_100_000L },
+                        secondary = (object?)null,
+                        planType = "pro"
+                    }
+                }),
+                Reply(3, new { account = new { type = "chatgpt", planType = "pro" } }),
+                Reply(4, new
+                {
+                    data = new[]
+                    {
+                        new { id = "active-session", name = "Active", cwd = activeProject },
+                        new { id = "missing-session", name = "Missing", cwd = missingProject }
+                    },
+                    nextCursor = (string?)null
+                })
+            ]
+        ]);
+        var strategy = new CodexCliFetchStrategy(transportFactory);
+        var context = new ProviderFetchContext(
+            UsageProvider.Codex,
+            new Dictionary<string, string>
+            {
+                ["PATH"] = binDir,
+                ["PATHEXT"] = ".CMD",
+                ["CODEX_HOME"] = codexHome
+            },
+            IncludeCredits: true,
+            InitializeTimeout: TimeSpan.FromSeconds(1),
+            RequestTimeout: TimeSpan.FromSeconds(1));
+
+        var result = await strategy.FetchAsync(context, CancellationToken.None);
+
+        var session = Assert.Single(result.Usage.Sessions!);
+        Assert.Equal("active-session", session.SessionId);
+        Assert.Equal("Active", session.SessionName);
+        Assert.Equal(activeProject, session.ProjectPath);
+    }
+
+    [Fact]
+    public async Task CodexCliFetchKeepsAvailableSessionsWhenThreadListIsEmpty()
+    {
+        var testRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var binDir = Path.Combine(testRoot, "bin");
+        var codexHome = Path.Combine(testRoot, "codex-home");
+        var sessionDir = Path.Combine(codexHome, "sessions", "2026", "07", "16");
+        var projectPath = Path.Combine(testRoot, "active-project");
+        Directory.CreateDirectory(binDir);
+        Directory.CreateDirectory(sessionDir);
+        Directory.CreateDirectory(projectPath);
+        File.WriteAllText(Path.Combine(binDir, "codex.cmd"), "@echo off\r\n");
+        File.WriteAllLines(
+            Path.Combine(sessionDir, "rollout-active.jsonl"),
+            [
+                JsonSerializer.Serialize(new
+                {
+                    timestamp = "2026-07-16T10:00:00Z",
+                    type = "session_meta",
+                    payload = new { id = "active-session", thread_source = "user", cwd = projectPath, source = "desktop" }
+                }),
+                JsonSerializer.Serialize(new
+                {
+                    timestamp = "2026-07-16T10:05:00Z",
+                    type = "event_msg",
+                    payload = new
+                    {
+                        type = "token_count",
+                        info = new
+                        {
+                            total_token_usage = new { total_tokens = 30_000 },
+                            last_token_usage = new { total_tokens = 15_000 },
+                            model_context_window = 256000
+                        }
+                    }
+                })
+            ]);
+
+        static string Reply(int id, object result) => JsonSerializer.Serialize(new { id, result });
+        var transportFactory = new QueueCodexRpcTransportFactory(
+        [
+            [
+                Reply(1, new { ok = true }),
+                Reply(2, new
+                {
+                    rateLimits = new
+                    {
+                        primary = new { usedPercent = 0.0, windowDurationMins = 10080, resetsAt = 1_800_100_000L },
+                        secondary = (object?)null,
+                        planType = "pro"
+                    }
+                }),
+                Reply(3, new { account = new { type = "chatgpt", planType = "pro" } }),
+                Reply(4, new { data = Array.Empty<object>(), nextCursor = (string?)null })
+            ]
+        ]);
+        var strategy = new CodexCliFetchStrategy(transportFactory);
+        var context = new ProviderFetchContext(
+            UsageProvider.Codex,
+            new Dictionary<string, string>
+            {
+                ["PATH"] = binDir,
+                ["PATHEXT"] = ".CMD",
+                ["CODEX_HOME"] = codexHome
+            },
+            IncludeCredits: true,
+            InitializeTimeout: TimeSpan.FromSeconds(1),
+            RequestTimeout: TimeSpan.FromSeconds(1));
+
+        var result = await strategy.FetchAsync(context, CancellationToken.None);
+
+        var session = Assert.Single(result.Usage.Sessions!);
+        Assert.Equal("active-session", session.SessionId);
+        Assert.Equal(projectPath, session.ProjectPath);
     }
 
     private static IReadOnlyDictionary<string, string> TestEnvironment(string codexHome) => new Dictionary<string, string>

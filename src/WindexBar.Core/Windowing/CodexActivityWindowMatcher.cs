@@ -3,7 +3,13 @@ namespace WindexBar.Core.Windowing;
 public sealed record CodexActivityWindowSnapshot(
     string? ProcessName,
     string? WindowTitle,
-    IReadOnlyCollection<string> DescendantProcessNames);
+    IReadOnlyCollection<string> DescendantProcessNames,
+    bool HasTerminalCodexProcess = false);
+
+public sealed record CodexActivityProcessSnapshot(
+    int ProcessId,
+    int ParentProcessId,
+    string? ProcessName);
 
 public static class CodexActivityWindowMatcher
 {
@@ -50,7 +56,41 @@ public static class CodexActivityWindowMatcher
             return true;
         }
 
+        if (window.HasTerminalCodexProcess)
+        {
+            return true;
+        }
+
         return window.WindowTitle?.Contains("codex", StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    public static bool HasTerminalCodexProcess(IReadOnlyCollection<CodexActivityProcessSnapshot> processes)
+    {
+        var processesById = processes
+            .GroupBy(process => process.ProcessId)
+            .ToDictionary(group => group.Key, group => group.First());
+
+        foreach (var process in processes)
+        {
+            if (!string.Equals(NormalizeProcessName(process.ProcessName), "codex", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var visited = new HashSet<int> { process.ProcessId };
+            var parentProcessId = process.ParentProcessId;
+            while (parentProcessId > 0 && visited.Add(parentProcessId) && processesById.TryGetValue(parentProcessId, out var parent))
+            {
+                if (IsTerminalProcess(NormalizeProcessName(parent.ProcessName)))
+                {
+                    return true;
+                }
+
+                parentProcessId = parent.ParentProcessId;
+            }
+        }
+
+        return false;
     }
 
     public static bool IsWindexBarWindow(CodexActivityWindowSnapshot? window)
