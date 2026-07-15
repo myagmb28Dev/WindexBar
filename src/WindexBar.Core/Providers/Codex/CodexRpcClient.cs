@@ -63,20 +63,40 @@ public sealed class CodexRpcClient : IAsyncDisposable
     public Task<RpcAccountResponse> FetchAccountAsync(CancellationToken cancellationToken) =>
         RequestAsync("account/read", null, _requestTimeout, WindexBarJsonContext.Default.RpcAccountResponse, cancellationToken);
 
-    public Task<RpcThreadListResponse> FetchThreadsAsync(CancellationToken cancellationToken) =>
-        RequestAsync(
-            "thread/list",
-            new JsonObject
+    public async Task<RpcThreadListResponse> FetchThreadsAsync(CancellationToken cancellationToken)
+    {
+        var response = new RpcThreadListResponse();
+        var seenCursors = new HashSet<string>(StringComparer.Ordinal);
+        string? cursor = null;
+
+        do
+        {
+            var parameters = new JsonObject
             {
+                ["useStateDbOnly"] = true,
                 ["limit"] = 100,
                 ["archived"] = false,
                 ["sortKey"] = "updated_at",
-                ["sortDirection"] = "desc",
-                ["sourceKinds"] = new JsonArray("cli", "vscode", "appServer")
-            },
-            _requestTimeout,
-            WindexBarJsonContext.Default.RpcThreadListResponse,
-            cancellationToken);
+                ["sortDirection"] = "desc"
+            };
+            if (!string.IsNullOrWhiteSpace(cursor))
+            {
+                parameters["cursor"] = cursor;
+            }
+
+            var page = await RequestAsync(
+                "thread/list",
+                parameters,
+                _requestTimeout,
+                WindexBarJsonContext.Default.RpcThreadListResponse,
+                cancellationToken).ConfigureAwait(false);
+            response.Data.AddRange(page.Data);
+            cursor = page.NextCursor;
+        }
+        while (!string.IsNullOrWhiteSpace(cursor) && seenCursors.Add(cursor));
+
+        return response;
+    }
 
     private async Task RequestAsync(string method, JsonObject? parameters, TimeSpan timeout, CancellationToken cancellationToken)
     {

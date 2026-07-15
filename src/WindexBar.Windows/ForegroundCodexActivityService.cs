@@ -10,6 +10,7 @@ internal sealed class ForegroundCodexActivityService : IDisposable
     private readonly DispatcherTimer _timer = new();
     private bool _isActive;
     private bool _disposed;
+    private IntPtr _lastCodexForegroundWindow;
 
     public ForegroundCodexActivityService()
     {
@@ -52,12 +53,38 @@ internal sealed class ForegroundCodexActivityService : IDisposable
         }
 
         var foregroundWindow = ReadForegroundWindow();
-        if (CodexActivityWindowMatcher.IsWindexBarWindow(foregroundWindow))
+        if (foregroundWindow is null)
         {
+            _lastCodexForegroundWindow = IntPtr.Zero;
+            PublishSample(false);
             return;
         }
 
-        var isActive = CodexActivityWindowMatcher.IsCodexActivity(foregroundWindow);
+        if (CodexActivityWindowMatcher.IsWindexBarWindow(foregroundWindow.Window))
+        {
+            var hasPreviousCodexWindow = _lastCodexForegroundWindow != IntPtr.Zero
+                && IsWindow(_lastCodexForegroundWindow);
+            var shouldPreserve = AutoVisibilityPolicy.ShouldPreserveWhileOwnWindowFocused(
+                hasPreviousCodexWindow,
+                hasPreviousCodexWindow && IsWindowVisible(_lastCodexForegroundWindow),
+                hasPreviousCodexWindow && IsIconic(_lastCodexForegroundWindow));
+            if (shouldPreserve)
+            {
+                return;
+            }
+
+            _lastCodexForegroundWindow = IntPtr.Zero;
+            PublishSample(false);
+            return;
+        }
+
+        var isActive = CodexActivityWindowMatcher.IsCodexActivity(foregroundWindow.Window);
+        _lastCodexForegroundWindow = isActive ? foregroundWindow.Handle : IntPtr.Zero;
+        PublishSample(isActive);
+    }
+
+    private void PublishSample(bool isActive)
+    {
         ActivitySampled?.Invoke(this, isActive);
         SetActive(isActive);
     }
@@ -73,7 +100,7 @@ internal sealed class ForegroundCodexActivityService : IDisposable
         ActivityChanged?.Invoke(this, value);
     }
 
-    private static CodexActivityWindowSnapshot? ReadForegroundWindow()
+    private static ForegroundWindowInfo? ReadForegroundWindow()
     {
         var handle = GetForegroundWindow();
         if (handle == IntPtr.Zero)
@@ -89,11 +116,18 @@ internal sealed class ForegroundCodexActivityService : IDisposable
 
         try
         {
-            var process = Process.GetProcessById((int)processId);
-            return new CodexActivityWindowSnapshot(
-                process.ProcessName,
-                ReadWindowTitle(handle),
-                ReadDescendantProcessNames(process.Id));
+            using var process = Process.GetProcessById((int)processId);
+            var processes = ReadProcessInfos();
+            return new ForegroundWindowInfo(
+                handle,
+                new CodexActivityWindowSnapshot(
+                    process.ProcessName,
+                    ReadWindowTitle(handle),
+                    ReadDescendantProcessNames(process.Id, processes),
+                    CodexActivityWindowMatcher.HasTerminalCodexProcess(
+                        processes
+                            .Select(item => new CodexActivityProcessSnapshot(item.ProcessId, item.ParentProcessId, item.Name))
+                            .ToArray())));
         }
         catch
         {
@@ -114,13 +148,17 @@ internal sealed class ForegroundCodexActivityService : IDisposable
         return copied <= 0 ? null : new string(buffer, 0, copied);
     }
 
-    private static IReadOnlyCollection<string> ReadDescendantProcessNames(int rootProcessId)
-    {
-        var processes = Process.GetProcesses()
-            .Select(process => TryReadProcessInfo(process))
+    private static ProcessInfo[] ReadProcessInfos() =>
+        Process.GetProcesses()
+            .Select(TryReadProcessInfo)
             .Where(info => info is not null)
             .Cast<ProcessInfo>()
             .ToArray();
+
+    private static IReadOnlyCollection<string> ReadDescendantProcessNames(
+        int rootProcessId,
+        IReadOnlyCollection<ProcessInfo> processes)
+    {
         var childrenByParent = processes
             .GroupBy(info => info.ParentProcessId)
             .ToDictionary(group => group.Key, group => group.ToArray());
@@ -186,6 +224,18 @@ internal sealed class ForegroundCodexActivityService : IDisposable
     private static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
@@ -203,6 +253,8 @@ internal sealed class ForegroundCodexActivityService : IDisposable
         out int returnLength);
 
     private sealed record ProcessInfo(int ProcessId, int ParentProcessId, string Name);
+
+    private sealed record ForegroundWindowInfo(IntPtr Handle, CodexActivityWindowSnapshot Window);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct ProcessBasicInformation
