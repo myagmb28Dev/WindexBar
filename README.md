@@ -39,38 +39,6 @@ Source install:
 Source install launches WindexBar after installation by default.
 Use `.\install.cmd -NoLaunch` to install without launching, or `.\install.cmd -NoStartup` to skip the Windows startup shortcut.
 
-## Requirements
-
-- Codex CLI: WindexBar reads Codex usage through `codex app-server`, so the `codex` command must be available on `PATH`.
-- WindexBar checks Codex CLI compatibility in the background and automatically updates older installations. This build requires Codex CLI 0.144.4 or later.
-- Install Codex CLI: [Codex CLI setup](https://developers.openai.com/codex/cli)
-
-Windows PowerShell:
-
-```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"
-```
-
-Node/npm:
-
-```shell
-npm install -g @openai/codex
-```
-
-Bun:
-
-```shell
-bun install -g @openai/codex
-```
-
-Homebrew:
-
-```shell
-brew install --cask codex
-```
-
-Other downloads: [Codex releases](https://github.com/openai/codex/releases/latest)
-
 ## Usage
 
 Run the app, then WindexBar appears as an icon in the system tray.
