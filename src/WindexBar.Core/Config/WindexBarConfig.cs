@@ -5,7 +5,7 @@ namespace WindexBar.Core.Config;
 
 public sealed class WindexBarConfig
 {
-    public const int CurrentVersion = 4;
+    public const int CurrentVersion = 6;
     public const int MinRefreshIntervalSeconds = 1;
     public const int DefaultRefreshIntervalSeconds = 30;
     public const int MaxRefreshIntervalSeconds = 3600;
@@ -36,6 +36,12 @@ public sealed class WindexBarConfig
     [JsonPropertyName("hotkeys")]
     public HotkeyConfig Hotkeys { get; set; } = new();
 
+    [JsonPropertyName("codexUpdates")]
+    public CodexUpdateConfig CodexUpdates { get; set; } = new();
+
+    [JsonPropertyName("style")]
+    public StyleConfig Style { get; set; } = new();
+
     public static WindexBarConfig Default() => new();
 
     public WindexBarConfig Normalized()
@@ -43,6 +49,8 @@ public sealed class WindexBarConfig
         Version = CurrentVersion;
         Language = NormalizeLanguage(Language);
         Hotkeys = (Hotkeys ?? new HotkeyConfig()).Normalized();
+        CodexUpdates = (CodexUpdates ?? new CodexUpdateConfig()).Normalized();
+        Style = (Style ?? new StyleConfig()).Normalized();
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var normalized = new List<ProviderConfig>();
@@ -90,6 +98,92 @@ public sealed class WindexBarConfig
         }
 
         Providers.Add(value.Normalized());
+    }
+}
+
+public sealed class StyleConfig
+{
+    public const string DefaultGaugeThickness = "default";
+    public const string DefaultGaugeColor = "#8D78D6";
+    public const string DefaultGaugeAnimation = "smooth";
+
+    [JsonPropertyName("gaugeThickness")]
+    public string GaugeThickness { get; set; } = DefaultGaugeThickness;
+
+    [JsonPropertyName("gaugeColor")]
+    public string GaugeColor { get; set; } = DefaultGaugeColor;
+
+    [JsonPropertyName("gaugeAnimation")]
+    public string GaugeAnimation { get; set; } = DefaultGaugeAnimation;
+
+    public StyleConfig Normalized()
+    {
+        GaugeThickness = NormalizeGaugeThickness(GaugeThickness);
+        GaugeColor = NormalizeGaugeColor(GaugeColor);
+        GaugeAnimation = NormalizeGaugeAnimation(GaugeAnimation);
+        return this;
+    }
+
+    public static string NormalizeGaugeThickness(string? value) =>
+        value?.Trim().ToLowerInvariant() switch
+        {
+            "thin" => "thin",
+            "thick" => "thick",
+            _ => DefaultGaugeThickness
+        };
+
+    public static string NormalizeGaugeColor(string? value)
+    {
+        var candidate = value?.Trim();
+        if (candidate is { Length: 7 }
+            && candidate[0] == '#'
+            && uint.TryParse(
+                candidate.AsSpan(1),
+                System.Globalization.NumberStyles.HexNumber,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out _))
+        {
+            return candidate.ToUpperInvariant();
+        }
+
+        return DefaultGaugeColor;
+    }
+
+    public static string NormalizeGaugeAnimation(string? value) =>
+        value?.Trim().ToLowerInvariant() switch
+        {
+            "fast" => "fast",
+            "off" => "off",
+            _ => DefaultGaugeAnimation
+        };
+}
+
+public sealed class CodexUpdateConfig
+{
+    public const string DefaultInstallMethod = "auto";
+
+    [JsonPropertyName("installMethod")]
+    public string InstallMethod { get; set; } = DefaultInstallMethod;
+
+    [JsonPropertyName("automaticallyUpdate")]
+    public bool AutomaticallyUpdate { get; set; } = true;
+
+    [JsonPropertyName("customCommand")]
+    public string? CustomCommand { get; set; }
+
+    [JsonPropertyName("latestVersion")]
+    public string? LatestVersion { get; set; }
+
+    [JsonPropertyName("lastCheckedAt")]
+    public DateTimeOffset? LastCheckedAt { get; set; }
+
+    public CodexUpdateConfig Normalized()
+    {
+        InstallMethod = CodexInstallMethodNames.Normalize(InstallMethod);
+        AutomaticallyUpdate = true;
+        CustomCommand = string.IsNullOrWhiteSpace(CustomCommand) ? null : CustomCommand.Trim();
+        LatestVersion = string.IsNullOrWhiteSpace(LatestVersion) ? null : LatestVersion.Trim();
+        return this;
     }
 }
 

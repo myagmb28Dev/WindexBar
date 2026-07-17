@@ -1,5 +1,6 @@
 using WindexBar.Core.Config;
 using WindexBar.Core.Refresh;
+using WindexBar.Core.Updates;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using WinApplication = Microsoft.UI.Xaml.Application;
@@ -12,6 +13,7 @@ public partial class App : WinApplication
 
     private bool _initialized;
     private Mutex? _singleInstanceMutex;
+    private HttpClient? _httpClient;
 
     public App()
     {
@@ -24,6 +26,7 @@ public partial class App : WinApplication
     public SettingsStore SettingsStore { get; private set; } = null!;
     public UsageStore UsageStore { get; private set; } = null!;
     public TrayIconService TrayIconService { get; private set; } = null!;
+    public CodexCliUpdateService CodexCliUpdateService { get; private set; } = null!;
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
@@ -46,9 +49,16 @@ public partial class App : WinApplication
         }
 
         UsageStore = new UsageStore(SettingsStore);
-        TrayIconService = new TrayIconService(SettingsStore, UsageStore, DispatcherQueue.GetForCurrentThread());
+        _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        CodexCliUpdateService = new CodexCliUpdateService(
+            new GithubCodexVersionSource(_httpClient),
+            new CodexProcessRunner());
+        TrayIconService = new TrayIconService(
+            SettingsStore,
+            UsageStore,
+            CodexCliUpdateService,
+            DispatcherQueue.GetForCurrentThread());
         LogMessage("Tray icon service created.");
-        UsageStore.StartBackgroundRefresh();
         TrayIconService.ShowStatusWindow();
         LogMessage("ShowStatusWindow call completed.");
         _initialized = true;
@@ -58,6 +68,7 @@ public partial class App : WinApplication
     {
         TrayIconService.Dispose();
         UsageStore.Dispose();
+        _httpClient?.Dispose();
         _singleInstanceMutex?.ReleaseMutex();
         _singleInstanceMutex?.Dispose();
         Exit();
