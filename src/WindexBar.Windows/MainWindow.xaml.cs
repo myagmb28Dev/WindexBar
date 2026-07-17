@@ -3,6 +3,7 @@ using WindexBar.Core.Formatting;
 using WindexBar.Core.Models;
 using WindexBar.Core.Refresh;
 using WindexBar.Core.Windowing;
+using WindexBar.Core.Updates;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -34,7 +35,9 @@ public sealed partial class MainWindow : Window
 
     private readonly UsageStore _usageStore;
     private readonly SettingsStore _settingsStore;
+    private readonly CodexCliUpdateService _codexCliUpdateService;
     private readonly WinUiDispatcherQueue _dispatcher;
+    private readonly CancellationTokenSource _lifetimeCancellation = new();
     private readonly WindowPlacementController _windowPlacement = new(new WindowPosition(96, 96));
     private readonly DispatcherTimer _barAnimationTimer = new();
     private readonly List<DispatcherTimer> _scrollBarHideTimers = [];
@@ -44,6 +47,7 @@ public sealed partial class MainWindow : Window
     private readonly Dictionary<string, double> _sessionBarValues = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, bool> _collapsedSessionGroups = new(StringComparer.OrdinalIgnoreCase);
     private double _barSweepPhase;
+    private double _stylePreviewSweepPhase;
     private double _currentBarValue;
     private double _targetCurrentBarValue;
     private double _weeklyBarValue;
@@ -51,6 +55,9 @@ public sealed partial class MainWindow : Window
     private bool _isFastServiceTier;
     private bool _isSideBarOpen = true;
     private bool _projectSessionsFirst = true;
+    private bool _codexVersionCheckStarted;
+    private bool _codexVersionDialogOpen;
+    private CodexVersionCheckResult? _lastCodexVersionCheck;
     private Grid TitleBarDragRegion = null!;
     private Grid ContentRootGrid = null!;
     private Grid SideBarHost = null!;
@@ -59,6 +66,7 @@ public sealed partial class MainWindow : Window
     private Border HudView = null!;
     private Border SessionsView = null!;
     private Border CreditsView = null!;
+    private Border StyleView = null!;
     private Border SettingsView = null!;
     private Border ResetCreditDetailsView = null!;
     private ScrollViewer HudScrollViewer = null!;
@@ -91,6 +99,10 @@ public sealed partial class MainWindow : Window
     private Microsoft.UI.Xaml.Controls.Primitives.ToggleButton SessionSortToggleButton = null!;
     private TextBlock AccountLabelText = null!;
     private TextBlock SettingsTitleText = null!;
+    private TextBlock StyleTitleText = null!;
+    private TextBlock GaugeThicknessLabelText = null!;
+    private TextBlock GaugeColorLabelText = null!;
+    private TextBlock GaugeAnimationLabelText = null!;
     private TextBlock RefreshIntervalLabelText = null!;
     private TextBlock SecondsLabelText = null!;
     private TextBlock LanguageLabelText = null!;
@@ -99,37 +111,65 @@ public sealed partial class MainWindow : Window
     private CheckBox StartWithWindowsCheckBox = null!;
     private CheckBox AutoShowWithCodexCheckBox = null!;
     private Button SettingsButton = null!;
+    private Button StyleButton = null!;
     private Button ResetCreditDetailsButton = null!;
     private Button QuitButton = null!;
     private Button SaveSettingsButton = null!;
+    private Button SaveStyleButton = null!;
     private TextBox RefreshIntervalSecondsTextBox = null!;
     private TextBox ToggleHotkeyTextBox = null!;
     private TextBox ToggleSidebarHotkeyTextBox = null!;
     private ComboBox LanguageComboBox = null!;
+    private ComboBox GaugeThicknessComboBox = null!;
+    private ComboBox GaugeAnimationComboBox = null!;
+    private Button GaugeColorButton = null!;
+    private Window? _gaugeColorWindow;
+    private global::Windows.UI.Color _selectedGaugeColor = global::Windows.UI.Color.FromArgb(0xFF, 0x8D, 0x78, 0xD6);
+    private global::Windows.UI.Color _previewGaugeColor = global::Windows.UI.Color.FromArgb(0xFF, 0x8D, 0x78, 0xD6);
+    private Grid StylePreviewTrackRoot = null!;
+    private Border StylePreviewFillBar = null!;
+    private Border StylePreviewSweepBar = null!;
+    private ComboBox CodexInstallMethodComboBox = null!;
+    private TextBlock CodexInstallMethodLabelText = null!;
+    private TextBlock CodexUpdateCommandPreviewText = null!;
+    private TextBlock CurrentCodexVersionText = null!;
+    private Button CheckCodexVersionButton = null!;
+    private TextBlock CustomCodexUpdateCommandLabelText = null!;
+    private TextBox CustomCodexUpdateCommandTextBox = null!;
     private Button HomeButton = null!;
     private Button SessionsButton = null!;
     private Button CreditsButton = null!;
 
-    public MainWindow(UsageStore usageStore, SettingsStore settingsStore)
+    public MainWindow(
+        UsageStore usageStore,
+        SettingsStore settingsStore,
+        CodexCliUpdateService codexCliUpdateService)
     {
         InitializeComponent();
         _usageStore = usageStore;
         _settingsStore = settingsStore;
+        _codexCliUpdateService = codexCliUpdateService;
         _dispatcher = WinUiDispatcherQueue.GetForCurrentThread();
 
         BuildLayout();
         ApplyLanguage();
         ConfigureCompactWindow();
+        AppWindow.Changed += OnAppWindowChanged;
         RootLayout.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(OnModelNavigationKeyDown), true);
         RootLayout.PointerPressed += (_, _) =>
         {
             RootLayout.Focus(FocusState.Pointer);
         };
 
-        RootLayout.Loaded += (_, _) =>
+        RootLayout.Loaded += async (_, _) =>
         {
             RootLayout.Focus(FocusState.Programmatic);
             ResizeForCurrentView();
+            if (!_codexVersionCheckStarted)
+            {
+                _codexVersionCheckStarted = true;
+                await CheckCodexVersionAsync(forceLatestVersionRefresh: false);
+            }
         };
 
         _usageStore.Changed += OnUsageChanged;
@@ -141,8 +181,13 @@ public sealed partial class MainWindow : Window
 
         Closed += (_, _) =>
         {
+            _gaugeColorWindow?.Close();
+            _gaugeColorWindow = null;
+            AppWindow.Changed -= OnAppWindowChanged;
             _usageStore.Changed -= OnUsageChanged;
             _settingsStore.Changed -= OnSettingsChanged;
+            _lifetimeCancellation.Cancel();
+            _lifetimeCancellation.Dispose();
             _barAnimationTimer.Stop();
             foreach (var timer in _scrollBarHideTimers)
             {
@@ -169,7 +214,7 @@ public sealed partial class MainWindow : Window
 
         var titleText = new TextBlock
         {
-            Text = "WindexBar",
+            Text = $"WindexBar {AppReleaseVersion.DisplayValue}",
             Margin = new Thickness(10, 0, 0, 0),
             Padding = new Thickness(0, 0, 12, 0),
             VerticalAlignment = VerticalAlignment.Center,
@@ -237,6 +282,10 @@ public sealed partial class MainWindow : Window
         ResetCreditDetailsButton = CreateSideBarButton("\u21BB");
         ResetCreditDetailsButton.Click += ResetCreditDetailsButton_Click;
         SideBarPanel.Children.Add(ResetCreditDetailsButton);
+
+        StyleButton = CreateSideBarButton("\u25C8");
+        StyleButton.Click += StyleButton_Click;
+        SideBarPanel.Children.Add(StyleButton);
 
         SettingsButton = CreateSideBarButton("\u2699");
         SettingsButton.Click += SettingsButton_Click;
@@ -386,6 +435,19 @@ public sealed partial class MainWindow : Window
         Grid.SetColumn(SettingsView, 1);
         ContentRootGrid.Children.Add(SettingsView);
         BuildSettingsView();
+
+        StyleView = new Border
+        {
+            Padding = new Thickness(11, 9, 11, 9),
+            Background = Brush(0xFF, 0x1F, 0x1C, 0x24),
+            BorderBrush = Brush(0x99, 0x7D, 0x62, 0xC7),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(14),
+            Visibility = Visibility.Collapsed
+        };
+        Grid.SetColumn(StyleView, 1);
+        ContentRootGrid.Children.Add(StyleView);
+        BuildStyleView();
 
         ResetCreditDetailsView = new Border
         {
@@ -713,6 +775,11 @@ public sealed partial class MainWindow : Window
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         settingsScrollViewer.Content = grid;
         SettingsView.Child = settingsRoot;
 
@@ -830,6 +897,74 @@ public sealed partial class MainWindow : Window
         Grid.SetRow(AutoShowWithCodexCheckBox, 7);
         grid.Children.Add(AutoShowWithCodexCheckBox);
 
+        var codexVersionGrid = new Grid { ColumnSpacing = 8 };
+        codexVersionGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        codexVersionGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetRow(codexVersionGrid, 8);
+        grid.Children.Add(codexVersionGrid);
+        CurrentCodexVersionText = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        codexVersionGrid.Children.Add(CurrentCodexVersionText);
+        CheckCodexVersionButton = CreateBackButton("Check now");
+        CheckCodexVersionButton.Click += CheckCodexVersionButton_Click;
+        Grid.SetColumn(CheckCodexVersionButton, 1);
+        codexVersionGrid.Children.Add(CheckCodexVersionButton);
+
+        var installMethodGrid = new Grid { ColumnSpacing = 8 };
+        installMethodGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        installMethodGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(124) });
+        Grid.SetRow(installMethodGrid, 9);
+        grid.Children.Add(installMethodGrid);
+        CodexInstallMethodLabelText = new TextBlock
+        {
+            Text = "Codex install method",
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        installMethodGrid.Children.Add(CodexInstallMethodLabelText);
+        CodexInstallMethodComboBox = new ComboBox
+        {
+            HorizontalAlignment = HorizontalAlignment.Right,
+            MinWidth = 124
+        };
+        AddInstallMethodItem("Auto-detect", CodexInstallMethodNames.Auto);
+        AddInstallMethodItem("PowerShell", CodexInstallMethodNames.PowerShell);
+        AddInstallMethodItem("npm", CodexInstallMethodNames.Npm);
+        AddInstallMethodItem("Bun", CodexInstallMethodNames.Bun);
+        AddInstallMethodItem("Homebrew", CodexInstallMethodNames.Homebrew);
+        AddInstallMethodItem("WinGet", CodexInstallMethodNames.WinGet);
+        AddInstallMethodItem("Custom", CodexInstallMethodNames.Custom);
+        CodexInstallMethodComboBox.SelectionChanged += (_, _) => ApplyCustomUpdateCommandVisibility();
+        Grid.SetColumn(CodexInstallMethodComboBox, 1);
+        installMethodGrid.Children.Add(CodexInstallMethodComboBox);
+
+        CodexUpdateCommandPreviewText = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Opacity = 0.72,
+            FontSize = 11
+        };
+        Grid.SetRow(CodexUpdateCommandPreviewText, 10);
+        grid.Children.Add(CodexUpdateCommandPreviewText);
+
+        CustomCodexUpdateCommandLabelText = new TextBlock
+        {
+            Text = "Custom update command",
+            TextWrapping = TextWrapping.Wrap
+        };
+        Grid.SetRow(CustomCodexUpdateCommandLabelText, 11);
+        grid.Children.Add(CustomCodexUpdateCommandLabelText);
+        CustomCodexUpdateCommandTextBox = new TextBox
+        {
+            PlaceholderText = "Enter a Codex CLI update command.",
+            TextWrapping = TextWrapping.Wrap
+        };
+        CustomCodexUpdateCommandTextBox.TextChanged += (_, _) => UpdateCodexUpdateCommandPreview();
+        Grid.SetRow(CustomCodexUpdateCommandTextBox, 12);
+        grid.Children.Add(CustomCodexUpdateCommandTextBox);
+
         var buttons = new Grid { ColumnSpacing = 6 };
         buttons.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         buttons.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -843,6 +978,128 @@ public sealed partial class MainWindow : Window
         settingsQuitButton.HorizontalAlignment = HorizontalAlignment.Right;
         Grid.SetColumn(settingsQuitButton, 1);
         buttons.Children.Add(settingsQuitButton);
+    }
+
+    private void BuildStyleView()
+    {
+        var root = new Grid { RowSpacing = 8 };
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        StyleView.Child = root;
+
+        var content = new StackPanel { Spacing = 10 };
+        root.Children.Add(content);
+
+        StyleTitleText = new TextBlock
+        {
+            Text = "Style",
+            FontSize = 16,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+        };
+        AttachSectionTitleHomeNavigation(StyleTitleText);
+        content.Children.Add(StyleTitleText);
+        content.Children.Add(CreateSectionDivider());
+
+        StylePreviewTrackRoot = new Grid
+        {
+            Height = 6,
+            Margin = new Thickness(0, 4, 0, 5)
+        };
+        StylePreviewTrackRoot.Children.Add(new Border
+        {
+            Background = Brush(0xFF, 0x30, 0x28, 0x3A),
+            BorderBrush = Brush(0xFF, 0x5A, 0x4A, 0x74),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(3)
+        });
+        StylePreviewFillBar = new Border
+        {
+            HorizontalAlignment = HorizontalAlignment.Left,
+            CornerRadius = new CornerRadius(3)
+        };
+        StylePreviewTrackRoot.Children.Add(StylePreviewFillBar);
+        StylePreviewSweepBar = new Border
+        {
+            Opacity = 0.3,
+            IsHitTestVisible = false,
+            HorizontalAlignment = HorizontalAlignment.Left
+        };
+        StylePreviewTrackRoot.Children.Add(StylePreviewSweepBar);
+        content.Children.Add(StylePreviewTrackRoot);
+
+        GaugeThicknessComboBox = CreateStyleComboBox(
+            ("Thin", "thin"),
+            ("Default", StyleConfig.DefaultGaugeThickness),
+            ("Thick", "thick"));
+        GaugeThicknessLabelText = AddStyleOptionRow(content, "Gauge thickness", GaugeThicknessComboBox);
+
+        GaugeColorButton = new Button
+        {
+            MinWidth = 112,
+            HorizontalAlignment = HorizontalAlignment.Right
+        };
+        GaugeColorButton.Click += (_, _) => ShowGaugeColorWindow();
+        UpdateGaugeColorButton(_selectedGaugeColor);
+        GaugeColorLabelText = AddStyleOptionRow(content, "Gauge color", GaugeColorButton);
+
+        GaugeAnimationComboBox = CreateStyleComboBox(
+            ("Smooth", StyleConfig.DefaultGaugeAnimation),
+            ("Fast", "fast"),
+            ("Off", "off"));
+        GaugeAnimationLabelText = AddStyleOptionRow(content, "Animation", GaugeAnimationComboBox);
+
+        GaugeThicknessComboBox.SelectionChanged += (_, _) => ApplyStylePreview();
+        GaugeAnimationComboBox.SelectionChanged += (_, _) =>
+        {
+            _stylePreviewSweepPhase = 0;
+            ApplyStylePreview();
+        };
+
+        var buttons = new Grid { ColumnSpacing = 6 };
+        buttons.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        buttons.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetRow(buttons, 1);
+        root.Children.Add(buttons);
+        SaveStyleButton = CreateBackButton("Save");
+        SaveStyleButton.HorizontalAlignment = HorizontalAlignment.Left;
+        SaveStyleButton.Click += SaveStyleButton_Click;
+        buttons.Children.Add(SaveStyleButton);
+        var quitButton = CreateQuitButton();
+        quitButton.HorizontalAlignment = HorizontalAlignment.Right;
+        Grid.SetColumn(quitButton, 1);
+        buttons.Children.Add(quitButton);
+    }
+
+    private static ComboBox CreateStyleComboBox(params (string Label, string Value)[] options)
+    {
+        var comboBox = new ComboBox
+        {
+            HorizontalAlignment = HorizontalAlignment.Right,
+            MinWidth = 112
+        };
+        foreach (var option in options)
+        {
+            comboBox.Items.Add(new ComboBoxItem { Content = option.Label, Tag = option.Value });
+        }
+
+        return comboBox;
+    }
+
+    private static TextBlock AddStyleOptionRow(StackPanel root, string label, FrameworkElement control)
+    {
+        var row = new Grid { ColumnSpacing = 8 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var labelText = new TextBlock
+        {
+            Text = label,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        row.Children.Add(labelText);
+        Grid.SetColumn(control, 1);
+        row.Children.Add(control);
+        root.Children.Add(row);
+        return labelText;
     }
 
     private void BuildCreditsView()
@@ -952,8 +1209,10 @@ public sealed partial class MainWindow : Window
 
     public void ShowHudView()
     {
+        CloseGaugeColorWindow();
         SessionsView.Visibility = Visibility.Collapsed;
         CreditsView.Visibility = Visibility.Collapsed;
+        StyleView.Visibility = Visibility.Collapsed;
         SettingsView.Visibility = Visibility.Collapsed;
         ResetCreditDetailsView.Visibility = Visibility.Collapsed;
         HudView.Visibility = Visibility.Visible;
@@ -964,8 +1223,10 @@ public sealed partial class MainWindow : Window
 
     public void ShowCreditsView()
     {
+        CloseGaugeColorWindow();
         HudView.Visibility = Visibility.Collapsed;
         SessionsView.Visibility = Visibility.Collapsed;
+        StyleView.Visibility = Visibility.Collapsed;
         SettingsView.Visibility = Visibility.Collapsed;
         ResetCreditDetailsView.Visibility = Visibility.Collapsed;
         CreditsView.Visibility = Visibility.Visible;
@@ -976,27 +1237,53 @@ public sealed partial class MainWindow : Window
 
     public void ShowSettingsView()
     {
+        CloseGaugeColorWindow();
         RefreshIntervalSecondsTextBox.Text = _settingsStore.Codex.RefreshIntervalSeconds.ToString();
         ToggleHotkeyTextBox.Text = _settingsStore.Config.Hotkeys.ToggleWindow;
         ToggleSidebarHotkeyTextBox.Text = _settingsStore.Config.Hotkeys.ToggleSidebar;
         StartWithWindowsCheckBox.IsChecked = _settingsStore.Config.StartWithWindows;
         AutoShowWithCodexCheckBox.IsChecked = _settingsStore.Config.AutoShowWithCodex;
+        CustomCodexUpdateCommandTextBox.Text = _settingsStore.Config.CodexUpdates.CustomCommand ?? string.Empty;
+        SelectCodexInstallMethod(_settingsStore.Config.CodexUpdates.InstallMethod);
+        ApplyCustomUpdateCommandVisibility();
+        UpdateCodexVersionStatusText(_lastCodexVersionCheck);
         ApplyAutoShowShortcutState();
         SelectLanguage(_settingsStore.Config.Language);
         HudView.Visibility = Visibility.Collapsed;
         SessionsView.Visibility = Visibility.Collapsed;
         CreditsView.Visibility = Visibility.Collapsed;
+        StyleView.Visibility = Visibility.Collapsed;
         ResetCreditDetailsView.Visibility = Visibility.Collapsed;
         SettingsView.Visibility = Visibility.Visible;
         ApplyLanguage();
         _modelUsages.Clear();
     }
 
-    public void ShowResetCreditDetailsView()
+    public void ShowStyleView()
     {
+        SelectStyleOption(GaugeThicknessComboBox, _settingsStore.Config.Style.GaugeThickness);
+        SelectStyleOption(GaugeAnimationComboBox, _settingsStore.Config.Style.GaugeAnimation);
+        _selectedGaugeColor = ParseGaugeColor(_settingsStore.Config.Style.GaugeColor);
+        _previewGaugeColor = _selectedGaugeColor;
+        UpdateGaugeColorButton(_selectedGaugeColor);
         HudView.Visibility = Visibility.Collapsed;
         SessionsView.Visibility = Visibility.Collapsed;
         CreditsView.Visibility = Visibility.Collapsed;
+        SettingsView.Visibility = Visibility.Collapsed;
+        ResetCreditDetailsView.Visibility = Visibility.Collapsed;
+        StyleView.Visibility = Visibility.Visible;
+        ApplyLanguage();
+        ApplyStylePreview();
+        RootLayout.Focus(FocusState.Programmatic);
+    }
+
+    public void ShowResetCreditDetailsView()
+    {
+        CloseGaugeColorWindow();
+        HudView.Visibility = Visibility.Collapsed;
+        SessionsView.Visibility = Visibility.Collapsed;
+        CreditsView.Visibility = Visibility.Collapsed;
+        StyleView.Visibility = Visibility.Collapsed;
         SettingsView.Visibility = Visibility.Collapsed;
         ResetCreditDetailsView.Visibility = Visibility.Visible;
         ApplyLanguage();
@@ -1006,8 +1293,10 @@ public sealed partial class MainWindow : Window
 
     public void ShowSessionsView()
     {
+        CloseGaugeColorWindow();
         HudView.Visibility = Visibility.Collapsed;
         CreditsView.Visibility = Visibility.Collapsed;
+        StyleView.Visibility = Visibility.Collapsed;
         SettingsView.Visibility = Visibility.Collapsed;
         ResetCreditDetailsView.Visibility = Visibility.Collapsed;
         SessionsView.Visibility = Visibility.Visible;
@@ -1060,8 +1349,26 @@ public sealed partial class MainWindow : Window
 
     private void AnimateProgressBars()
     {
-        var sweepStep = _isFastServiceTier ? FastBarSweepStep : StandardBarSweepStep;
-        var activeWindowEaseFactor = _isFastServiceTier ? FastBarEaseFactor : StandardBarEaseFactor;
+        var animation = StyleConfig.NormalizeGaugeAnimation(_settingsStore.Config.Style.GaugeAnimation);
+        var animationEnabled = animation != "off";
+        var sweepStep = animation switch
+        {
+            "fast" => FastBarSweepStep * 1.6,
+            "off" => 0,
+            _ => _isFastServiceTier ? FastBarSweepStep : StandardBarSweepStep
+        };
+        var activeWindowEaseFactor = animation switch
+        {
+            "fast" => 0.42,
+            "off" => 1,
+            _ => _isFastServiceTier ? FastBarEaseFactor : StandardBarEaseFactor
+        };
+        var sessionEaseFactor = animation switch
+        {
+            "fast" => 0.42,
+            "off" => 1,
+            _ => StandardBarEaseFactor
+        };
 
         _barSweepPhase = (_barSweepPhase + sweepStep) % 1.0;
         var activeWindowSweep = EaseSweep(_barSweepPhase);
@@ -1073,18 +1380,20 @@ public sealed partial class MainWindow : Window
             CurrentWindowSweepBar,
             _currentBarValue,
             _targetCurrentBarValue,
-            activeWindowSweep);
+            activeWindowSweep,
+            animationEnabled);
         ApplyActiveBarProgress(
             WeeklyWindowTrackRoot,
             WeeklyWindowFillBar,
             WeeklyWindowSweepBar,
             _weeklyBarValue,
             _targetWeeklyBarValue,
-            activeWindowSweep);
+            activeWindowSweep,
+            animationEnabled);
 
         foreach (var sessionBar in _sessionUsageBars)
         {
-            sessionBar.CurrentValue = EaseBarValue(sessionBar.CurrentValue, sessionBar.TargetValue, StandardBarEaseFactor);
+            sessionBar.CurrentValue = EaseBarValue(sessionBar.CurrentValue, sessionBar.TargetValue, sessionEaseFactor);
             _sessionBarValues[sessionBar.SessionId] = sessionBar.CurrentValue;
             ApplyActiveBarProgress(
                 sessionBar.TrackRoot,
@@ -1092,7 +1401,22 @@ public sealed partial class MainWindow : Window
                 sessionBar.SweepBar,
                 sessionBar.CurrentValue,
                 sessionBar.TargetValue,
-                activeWindowSweep);
+                activeWindowSweep,
+                animationEnabled);
+        }
+
+        if (StyleView.Visibility == Visibility.Visible)
+        {
+            var previewAnimation = StyleConfig.NormalizeGaugeAnimation(
+                ReadStyleOption(GaugeAnimationComboBox, StyleConfig.DefaultGaugeAnimation));
+            var previewStep = previewAnimation switch
+            {
+                "fast" => FastBarSweepStep * 1.6,
+                "off" => 0,
+                _ => StandardBarSweepStep
+            };
+            _stylePreviewSweepPhase = (_stylePreviewSweepPhase + previewStep) % 1d;
+            ApplyStylePreview();
         }
     }
 
@@ -1104,7 +1428,14 @@ public sealed partial class MainWindow : Window
 
     private static double EaseSweep(double amount) => 1 - Math.Pow(1 - amount, 2);
 
-    private static void ApplyActiveBarProgress(Grid trackRoot, Border fillBar, Border sweepBar, double value, double targetValue, double sweep)
+    private static void ApplyActiveBarProgress(
+        Grid trackRoot,
+        Border fillBar,
+        Border sweepBar,
+        double value,
+        double targetValue,
+        double sweep,
+        bool animationEnabled)
     {
         var width = Math.Max(0, trackRoot.ActualWidth);
         var safeValue = Math.Clamp(value, 0, 100);
@@ -1112,8 +1443,8 @@ public sealed partial class MainWindow : Window
         var safeSweep = Math.Clamp(sweep, 0, 1);
 
         fillBar.Width = width * (safeValue / 100d);
-        sweepBar.Width = width * (safeTarget * safeSweep / 100d);
-        sweepBar.Opacity = 0.22 + (0.28 * safeSweep);
+        sweepBar.Width = animationEnabled ? width * (safeTarget * safeSweep / 100d) : 0;
+        sweepBar.Opacity = animationEnabled ? 0.22 + (0.28 * safeSweep) : 0;
     }
 
     private void ApplySideBarProgress()
@@ -1257,6 +1588,42 @@ public sealed partial class MainWindow : Window
         ShowSettingsView();
     }
 
+    private void OnAppWindowChanged(AppWindow sender, AppWindowChangedEventArgs args)
+    {
+        if (args.DidVisibilityChange && !sender.IsVisible)
+        {
+            CloseGaugeColorWindow();
+        }
+    }
+
+    private void CloseGaugeColorWindow(bool discardPendingColor = true)
+    {
+        if (discardPendingColor)
+        {
+            _previewGaugeColor = _selectedGaugeColor;
+        }
+
+        var popup = _gaugeColorWindow;
+        if (popup is null)
+        {
+            return;
+        }
+
+        _gaugeColorWindow = null;
+        popup.Close();
+    }
+
+    private void StyleButton_Click(object sender, RoutedEventArgs args)
+    {
+        if (StyleView.Visibility == Visibility.Visible)
+        {
+            ShowHudView();
+            return;
+        }
+
+        ShowStyleView();
+    }
+
     private void ResetCreditDetailsButton_Click(object sender, RoutedEventArgs args)
     {
         if (ResetCreditDetailsView.Visibility == Visibility.Visible)
@@ -1284,10 +1651,377 @@ public sealed partial class MainWindow : Window
                 WindexBarConfig.DefaultToggleSidebarHotkey);
             config.StartWithWindows = StartWithWindowsCheckBox.IsChecked == true;
             config.AutoShowWithCodex = AutoShowWithCodexCheckBox.IsChecked == true;
+            config.CodexUpdates.InstallMethod = ReadSelectedCodexInstallMethod();
+            config.CodexUpdates.CustomCommand = CustomCodexUpdateCommandTextBox.Text;
         });
         StartupShortcutService.Apply(_settingsStore.Config.StartWithWindows);
-        _usageStore.StartBackgroundRefresh();
+        if (_lastCodexVersionCheck?.Status is CodexVersionStatus.Current
+            or CodexVersionStatus.CompatibleWithoutLatestVersion
+            or CodexVersionStatus.RecommendedUpdate)
+        {
+            _usageStore.StartBackgroundRefresh();
+        }
         ShowHudView();
+    }
+
+    private void SaveStyleButton_Click(object sender, RoutedEventArgs args)
+    {
+        CloseGaugeColorWindow(discardPendingColor: false);
+        _selectedGaugeColor = _previewGaugeColor;
+        _settingsStore.Update(config =>
+        {
+            config.Style.GaugeThickness = ReadStyleOption(
+                GaugeThicknessComboBox,
+                StyleConfig.DefaultGaugeThickness);
+            config.Style.GaugeColor = FormatGaugeColor(_previewGaugeColor);
+            config.Style.GaugeAnimation = ReadStyleOption(
+                GaugeAnimationComboBox,
+                StyleConfig.DefaultGaugeAnimation);
+        });
+        ShowHudView();
+    }
+
+    private async void CheckCodexVersionButton_Click(object sender, RoutedEventArgs args)
+    {
+        await CheckCodexVersionAsync(forceLatestVersionRefresh: true, showCurrentResult: true);
+    }
+
+    private async Task CheckCodexVersionAsync(bool forceLatestVersionRefresh, bool showCurrentResult = false)
+    {
+        if (_codexVersionDialogOpen)
+        {
+            return;
+        }
+
+        CheckCodexVersionButton.IsEnabled = false;
+        UpdateCodexVersionStatusText(null, checking: true);
+        var cachedVersion = _settingsStore.Config.CodexUpdates.LatestVersion;
+        var cachedCheckedAt = _settingsStore.Config.CodexUpdates.LastCheckedAt;
+        try
+        {
+            var result = await _codexCliUpdateService.CheckAsync(
+                _settingsStore.Config.CodexUpdates,
+                forceLatestVersionRefresh,
+                _lifetimeCancellation.Token);
+            _lastCodexVersionCheck = result;
+            UpdateCodexVersionStatusText(result);
+
+            if (result.Status is CodexVersionStatus.Current
+                or CodexVersionStatus.CompatibleWithoutLatestVersion
+                or CodexVersionStatus.RecommendedUpdate)
+            {
+                _usageStore.StartBackgroundRefresh();
+            }
+
+            if (!string.Equals(cachedVersion, _settingsStore.Config.CodexUpdates.LatestVersion, StringComparison.Ordinal)
+                || cachedCheckedAt != _settingsStore.Config.CodexUpdates.LastCheckedAt)
+            {
+                _settingsStore.Save();
+            }
+
+            if (result.Status is CodexVersionStatus.Missing
+                or CodexVersionStatus.RequiredUpdate
+                or CodexVersionStatus.RecommendedUpdate)
+            {
+                await RunCodexUpdateAsync(result);
+                return;
+            }
+
+            if (showCurrentResult)
+            {
+                var message = result.Status == CodexVersionStatus.Current
+                    ? Text("Codex CLI is up to date.", "Codex CLI가 최신 버전이에요.")
+                    : Text(
+                        "The installed Codex CLI is compatible. The latest version could not be checked.",
+                        "설치된 Codex CLI는 호환돼요. 최신 버전은 확인하지 못했어요.");
+                await ShowMessageAsync(Text("Codex CLI", "Codex CLI"), message);
+            }
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception error)
+        {
+            UpdateCodexVersionStatusText(null, checkError: error.Message);
+            if (showCurrentResult)
+            {
+                await ShowMessageAsync(
+                    Text("Codex version check failed", "Codex 버전 확인 실패"),
+                    error.Message);
+            }
+        }
+        finally
+        {
+            CheckCodexVersionButton.IsEnabled = true;
+        }
+    }
+
+    private async Task ShowRequiredCodexUpdateDialogAsync(CodexVersionCheckResult result)
+    {
+        _codexVersionDialogOpen = true;
+        try
+        {
+            var installed = result.InstalledVersion?.ToString() ?? Text("not installed", "설치되지 않음");
+            var message = Text(
+                $"Installed: {installed}\nRequired by WindexBar: {result.RequiredVersion}\n\nUpdate Codex CLI to use WindexBar.",
+                $"설치 버전: {installed}\nWindexBar 요구 버전: {result.RequiredVersion}\n\nWindexBar를 사용하려면 Codex CLI를 업데이트해야 해요.");
+            var content = CreateUpdateDialogContent(message, result, out var methodSelector, out var customCommand);
+            var dialog = CreateDialog(Text("Codex CLI update required", "Codex CLI 업데이트 필요"), content);
+            dialog.PrimaryButtonText = Text("Update now", "지금 업데이트");
+            dialog.CloseButtonText = Text("Exit WindexBar", "WindexBar 종료");
+            var choice = await dialog.ShowAsync();
+            if (choice == ContentDialogResult.Primary)
+            {
+                if (!SaveUpdateDialogSettings(methodSelector, customCommand))
+                {
+                    ShowSettingsView();
+                    return;
+                }
+                await RunCodexUpdateAsync(result);
+            }
+            else
+            {
+                App.Current.Shutdown();
+            }
+        }
+        finally
+        {
+            _codexVersionDialogOpen = false;
+        }
+    }
+
+    private async Task ShowRecommendedCodexUpdateDialogAsync(CodexVersionCheckResult result)
+    {
+        _codexVersionDialogOpen = true;
+        try
+        {
+            var message = Text(
+                $"Installed: {result.InstalledVersion}\nLatest: {result.LatestVersion}\n\nYour current version is compatible with WindexBar.",
+                $"설치 버전: {result.InstalledVersion}\n최신 버전: {result.LatestVersion}\n\n현재 버전으로도 WindexBar를 사용할 수 있어요.");
+            var content = CreateUpdateDialogContent(message, result, out var methodSelector, out var customCommand);
+            var dialog = CreateDialog(Text("Codex CLI update available", "Codex CLI 업데이트 가능"), content);
+            dialog.PrimaryButtonText = Text("Update now", "지금 업데이트");
+            dialog.CloseButtonText = Text("Dismiss", "닫기");
+            if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+            {
+                if (!SaveUpdateDialogSettings(methodSelector, customCommand))
+                {
+                    ShowSettingsView();
+                    return;
+                }
+                await RunCodexUpdateAsync(result);
+            }
+        }
+        finally
+        {
+            _codexVersionDialogOpen = false;
+        }
+    }
+
+    private async Task RunCodexUpdateAsync(CodexVersionCheckResult check)
+    {
+        var target = check.LatestVersion ?? check.RequiredVersion;
+        var progressContent = new StackPanel { Spacing = 12, MinWidth = 220 };
+        progressContent.Children.Add(new TextBlock
+        {
+            Text = Text(
+                $"Updating Codex CLI to {target}...",
+                $"Codex CLI를 {target}(으)로 업데이트하는 중이에요..."),
+            TextWrapping = TextWrapping.Wrap
+        });
+        progressContent.Children.Add(new ProgressBar
+        {
+            IsIndeterminate = true,
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        });
+        progressContent.Children.Add(new TextBlock
+        {
+            Text = Text(
+                "WindexBar will verify the installed version when the update finishes.",
+                "업데이트가 끝나면 WindexBar가 설치 버전을 다시 확인해요."),
+            TextWrapping = TextWrapping.Wrap,
+            Opacity = 0.72,
+            FontSize = 11
+        });
+        var progress = CreateDialog(
+            Text("Updating Codex CLI", "Codex CLI 업데이트 중"),
+            progressContent);
+        var progressOperation = progress.ShowAsync();
+        await Task.Yield();
+        CodexUpdateResult? result = null;
+        Exception? updateError = null;
+        try
+        {
+            result = await _codexCliUpdateService.UpdateAsync(
+                _settingsStore.Config.CodexUpdates.InstallMethod,
+                _settingsStore.Config.CodexUpdates.CustomCommand,
+                target,
+                _lifetimeCancellation.Token);
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            updateError = error;
+        }
+        finally
+        {
+            progress.Hide();
+            await progressOperation;
+        }
+
+        if (updateError is not null)
+        {
+            await ShowMessageAsync(
+                Text("Codex CLI update failed", "Codex CLI 업데이트 실패"),
+                updateError.Message);
+            return;
+        }
+
+        if (result!.IsSuccess)
+        {
+            _lastCodexVersionCheck = new CodexVersionCheckResult(
+                CodexVersionStatus.Current,
+                result.InstalledVersion,
+                check.RequiredVersion,
+                check.LatestVersion,
+                check.DetectedInstallMethod,
+                check.UsedCachedLatestVersion,
+                null);
+            UpdateCodexVersionStatusText(_lastCodexVersionCheck);
+            await ShowMessageAsync(
+                Text("Codex CLI updated", "Codex CLI 업데이트 완료"),
+                Text(
+                    $"Codex CLI {result.InstalledVersion} is ready.",
+                    $"Codex CLI {result.InstalledVersion}을 사용할 수 있어요."));
+            _usageStore.StartBackgroundRefresh();
+            return;
+        }
+
+        var details = string.IsNullOrWhiteSpace(result.Command.CombinedOutput)
+            ? result.ErrorDescription ?? Text("Unknown error", "알 수 없는 오류")
+            : $"{result.ErrorDescription}\n\n{result.Command.CombinedOutput}";
+        await ShowMessageAsync(
+            Text("Codex CLI update failed", "Codex CLI 업데이트 실패"),
+            details);
+    }
+
+    private StackPanel CreateUpdateDialogContent(
+        string message,
+        CodexVersionCheckResult result,
+        out ComboBox methodSelector,
+        out TextBox customCommand)
+    {
+        var panel = new StackPanel { Spacing = 10 };
+        panel.Children.Add(new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap });
+        var commandPreview = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Opacity = 0.72,
+            FontSize = 11,
+            MinHeight = 18
+        };
+        panel.Children.Add(commandPreview);
+        panel.Children.Add(new TextBlock
+        {
+            Text = Text("Update method", "업데이트 방식"),
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+        });
+        var selector = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
+        AddInstallMethodItem(selector, $"Auto-detect ({result.DetectedInstallMethod})", CodexInstallMethodNames.Auto);
+        AddInstallMethodItem(selector, "PowerShell", CodexInstallMethodNames.PowerShell);
+        AddInstallMethodItem(selector, "npm", CodexInstallMethodNames.Npm);
+        AddInstallMethodItem(selector, "Bun", CodexInstallMethodNames.Bun);
+        AddInstallMethodItem(selector, "Homebrew", CodexInstallMethodNames.Homebrew);
+        AddInstallMethodItem(selector, "WinGet", CodexInstallMethodNames.WinGet);
+        AddInstallMethodItem(selector, "Custom", CodexInstallMethodNames.Custom);
+        SelectInstallMethod(selector, _settingsStore.Config.CodexUpdates.InstallMethod);
+        panel.Children.Add(selector);
+        var customBox = new TextBox
+        {
+            Text = _settingsStore.Config.CodexUpdates.CustomCommand ?? string.Empty,
+            PlaceholderText = Text(
+                "Enter a Codex CLI update command.",
+                "Codex CLI 업데이트 명령을 입력하세요."),
+            TextWrapping = TextWrapping.Wrap
+        };
+        panel.Children.Add(customBox);
+        void UpdateCustomVisibility()
+        {
+            var selectedMethod = ReadInstallMethod(selector);
+            customBox.Visibility = selectedMethod == CodexInstallMethodNames.Custom
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            var effectiveMethod = selectedMethod == CodexInstallMethodNames.Auto
+                ? result.DetectedInstallMethod
+                : selectedMethod;
+            try
+            {
+                var target = result.LatestVersion ?? result.RequiredVersion;
+                var command = CodexCliUpdateService.BuildUpdateCommand(effectiveMethod, customBox.Text, target);
+                commandPreview.Text = Text("Command: ", "명령: ") + command.Arguments[^1];
+            }
+            catch (InvalidOperationException)
+            {
+                commandPreview.Text = Text("Enter a custom update command.", "사용자 지정 업데이트 명령을 입력하세요.");
+            }
+        }
+
+        selector.SelectionChanged += (_, _) => UpdateCustomVisibility();
+        customBox.TextChanged += (_, _) => UpdateCustomVisibility();
+        UpdateCustomVisibility();
+        methodSelector = selector;
+        customCommand = customBox;
+        return panel;
+    }
+
+    private bool SaveUpdateDialogSettings(ComboBox methodSelector, TextBox customCommand)
+    {
+        var method = ReadInstallMethod(methodSelector);
+        if (method == CodexInstallMethodNames.Custom && string.IsNullOrWhiteSpace(customCommand.Text))
+        {
+            return false;
+        }
+
+        _settingsStore.Update(config =>
+        {
+            config.CodexUpdates.InstallMethod = method;
+            config.CodexUpdates.CustomCommand = customCommand.Text;
+        });
+        return true;
+    }
+
+    private static void AddInstallMethodItem(ComboBox comboBox, string content, string value) =>
+        comboBox.Items.Add(new ComboBoxItem { Content = content, Tag = value });
+
+    private static string ReadInstallMethod(ComboBox comboBox) =>
+        comboBox.SelectedItem is ComboBoxItem { Tag: string method }
+            ? CodexInstallMethodNames.Normalize(method)
+            : CodexInstallMethodNames.Auto;
+
+    private static void SelectInstallMethod(ComboBox comboBox, string? installMethod)
+    {
+        var normalized = CodexInstallMethodNames.Normalize(installMethod);
+        comboBox.SelectedItem = comboBox.Items
+            .OfType<ComboBoxItem>()
+            .FirstOrDefault(item => item.Tag is string value
+                && string.Equals(value, normalized, StringComparison.OrdinalIgnoreCase));
+        comboBox.SelectedIndex = comboBox.SelectedItem is null ? 0 : comboBox.SelectedIndex;
+    }
+
+    private ContentDialog CreateDialog(string title, string message) =>
+        CreateDialog(title, new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap });
+
+    private ContentDialog CreateDialog(string title, UIElement content) => new()
+    {
+        Title = title,
+        Content = content,
+        XamlRoot = RootLayout.XamlRoot
+    };
+
+    private async Task ShowMessageAsync(string title, string message)
+    {
+        var dialog = CreateDialog(title, message);
+        dialog.CloseButtonText = Text("Close", "닫기");
+        await dialog.ShowAsync();
     }
 
     private void ApplyAutoShowShortcutState()
@@ -1336,14 +2070,365 @@ public sealed partial class MainWindow : Window
         LanguageComboBox.SelectedIndex = 0;
     }
 
+    private static string ReadStyleOption(ComboBox comboBox, string fallback) =>
+        comboBox.SelectedItem is ComboBoxItem { Tag: string value } ? value : fallback;
+
+    private static void SelectStyleOption(ComboBox comboBox, string? value)
+    {
+        foreach (var item in comboBox.Items.OfType<ComboBoxItem>())
+        {
+            if (item.Tag is string candidate && string.Equals(candidate, value, StringComparison.OrdinalIgnoreCase))
+            {
+                comboBox.SelectedItem = item;
+                return;
+            }
+        }
+
+        comboBox.SelectedIndex = 0;
+    }
+
+    private StyleConfig ReadStyleSelection() => new StyleConfig
+    {
+        GaugeThickness = ReadStyleOption(GaugeThicknessComboBox, StyleConfig.DefaultGaugeThickness),
+        GaugeColor = FormatGaugeColor(_previewGaugeColor),
+        GaugeAnimation = ReadStyleOption(GaugeAnimationComboBox, StyleConfig.DefaultGaugeAnimation)
+    }.Normalized();
+
+    private static global::Windows.UI.Color ParseGaugeColor(string? value)
+    {
+        var normalized = StyleConfig.NormalizeGaugeColor(value);
+        return global::Windows.UI.Color.FromArgb(
+            0xFF,
+            Convert.ToByte(normalized.Substring(1, 2), 16),
+            Convert.ToByte(normalized.Substring(3, 2), 16),
+            Convert.ToByte(normalized.Substring(5, 2), 16));
+    }
+
+    private static string FormatGaugeColor(global::Windows.UI.Color color) =>
+        $"#{color.R:X2}{color.G:X2}{color.B:X2}";
+
+    private void ShowGaugeColorWindow()
+    {
+        if (_gaugeColorWindow is not null)
+        {
+            _gaugeColorWindow.Activate();
+            return;
+        }
+
+        var popup = new Window { Title = Text("Gauge color", "\uAC8C\uC774\uC9C0 \uC0C9\uC0C1") };
+        _gaugeColorWindow = popup;
+        var brightnessValue = Math.Max(_previewGaugeColor.R, Math.Max(_previewGaugeColor.G, _previewGaugeColor.B)) / 255d;
+        var baseColor = NormalizeGaugeColorBrightness(_previewGaugeColor);
+        var palette = new[]
+        {
+            baseColor,
+            global::Windows.UI.Color.FromArgb(0xFF, 0xFF, 0x5F, 0x57),
+            global::Windows.UI.Color.FromArgb(0xFF, 0xFF, 0xA3, 0x3E),
+            global::Windows.UI.Color.FromArgb(0xFF, 0xFF, 0xD1, 0x66),
+            global::Windows.UI.Color.FromArgb(0xFF, 0x43, 0xC5, 0x8A),
+            global::Windows.UI.Color.FromArgb(0xFF, 0x3B, 0xC7, 0xC4),
+            global::Windows.UI.Color.FromArgb(0xFF, 0x4F, 0x9D, 0xFF),
+            global::Windows.UI.Color.FromArgb(0xFF, 0x66, 0x70, 0xD9),
+            global::Windows.UI.Color.FromArgb(0xFF, 0x8D, 0x78, 0xD6),
+            global::Windows.UI.Color.FromArgb(0xFF, 0xC6, 0x5F, 0xD4),
+            global::Windows.UI.Color.FromArgb(0xFF, 0xD7, 0x56, 0x7D),
+            global::Windows.UI.Color.FromArgb(0xFF, 0x8B, 0x8B, 0x94)
+        };
+        var swatchButtons = new List<Button>();
+        var paletteGrid = new Grid
+        {
+            Width = 210,
+            RowSpacing = 8,
+            ColumnSpacing = 6,
+            HorizontalAlignment = HorizontalAlignment.Center
+        };
+        for (var column = 0; column < 6; column++)
+        {
+            paletteGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(30) });
+        }
+        paletteGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(30) });
+        paletteGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(30) });
+
+        void UpdateSwatchSelection()
+        {
+            for (var index = 0; index < swatchButtons.Count; index++)
+            {
+                var selected = palette[index].Equals(baseColor);
+                swatchButtons[index].BorderBrush = selected
+                    ? Brush(0xFF, 0xFF, 0xFF, 0xFF)
+                    : Brush(0x66, 0xFF, 0xFF, 0xFF);
+                swatchButtons[index].BorderThickness = new Thickness(selected ? 3 : 1);
+            }
+        }
+
+        for (var index = 0; index < palette.Length; index++)
+        {
+            var paletteColor = palette[index];
+            var swatch = new Button
+            {
+                Width = 30,
+                Height = 30,
+                MinWidth = 30,
+                MinHeight = 30,
+                Padding = new Thickness(0),
+                Background = new SolidColorBrush(paletteColor),
+                CornerRadius = new CornerRadius(6)
+            };
+            swatch.Click += (_, _) =>
+            {
+                baseColor = paletteColor;
+                _previewGaugeColor = ApplyGaugeBrightness(baseColor, brightnessValue);
+                UpdateSwatchSelection();
+                UpdateGaugeColorButton(_previewGaugeColor);
+                ApplyStylePreview();
+            };
+            Grid.SetColumn(swatch, index % 6);
+            Grid.SetRow(swatch, index / 6);
+            paletteGrid.Children.Add(swatch);
+            swatchButtons.Add(swatch);
+        }
+        UpdateSwatchSelection();
+
+        var brightness = new Slider
+        {
+            Width = 210,
+            Height = 32,
+            Minimum = 0,
+            Maximum = 100,
+            StepFrequency = 1
+        };
+        brightness.Value = brightnessValue * 100d;
+        brightness.ValueChanged += (_, args) =>
+        {
+            brightnessValue = args.NewValue / 100d;
+            _previewGaugeColor = ApplyGaugeBrightness(baseColor, brightnessValue);
+            UpdateGaugeColorButton(_previewGaugeColor);
+            ApplyStylePreview();
+        };
+
+        var panel = new StackPanel { Width = 210, Spacing = 8 };
+        panel.Children.Add(paletteGrid);
+        panel.Children.Add(new TextBlock
+        {
+            Text = Text("Brightness", "\uBC1D\uAE30"),
+            FontSize = 11,
+            Opacity = 0.75
+        });
+        panel.Children.Add(brightness);
+        popup.Content = new Border
+        {
+            Padding = new Thickness(10),
+            Background = Brush(0xFF, 0x1F, 0x1C, 0x24),
+            BorderBrush = Brush(0x99, 0x7D, 0x62, 0xC7),
+            BorderThickness = new Thickness(1),
+            Child = panel
+        };
+        OwnedWindowBehavior.Attach(popup, this);
+
+        popup.AppWindow.IsShownInSwitchers = false;
+        if (popup.AppWindow.Presenter is OverlappedPresenter presenter)
+        {
+            presenter.SetBorderAndTitleBar(hasBorder: true, hasTitleBar: false);
+            presenter.IsAlwaysOnTop = true;
+            presenter.IsMaximizable = false;
+            presenter.IsMinimizable = false;
+            presenter.IsResizable = false;
+        }
+
+        var popupScale = RootLayout.XamlRoot?.RasterizationScale ?? 1d;
+        var popupWidth = (int)Math.Ceiling(240 * popupScale);
+        var popupHeight = (int)Math.Ceiling(154 * popupScale);
+        popup.AppWindow.ResizeClient(new SizeInt32(popupWidth, popupHeight));
+        var displayArea = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Nearest);
+        var workArea = displayArea.WorkArea;
+        var popupX = AppWindow.Position.X + AppWindow.Size.Width + 8;
+        if (popupX + popupWidth > workArea.X + workArea.Width)
+        {
+            popupX = AppWindow.Position.X - popupWidth - 8;
+        }
+
+        popupX = Math.Clamp(popupX, workArea.X, workArea.X + workArea.Width - popupWidth);
+        var popupY = Math.Clamp(
+            AppWindow.Position.Y + 88,
+            workArea.Y,
+            workArea.Y + workArea.Height - popupHeight);
+        popup.AppWindow.Move(new PointInt32(popupX, popupY));
+        var hasActivated = false;
+        popup.Activated += (_, args) =>
+        {
+            if (args.WindowActivationState == WindowActivationState.Deactivated && hasActivated)
+            {
+                CloseGaugeColorWindow(discardPendingColor: false);
+                return;
+            }
+
+            hasActivated = true;
+        };
+        popup.Closed += (_, _) =>
+        {
+            _gaugeColorWindow = null;
+            ApplyStylePreview();
+        };
+        popup.Activate();
+    }
+
+    private static global::Windows.UI.Color NormalizeGaugeColorBrightness(global::Windows.UI.Color color)
+    {
+        var max = Math.Max(color.R, Math.Max(color.G, color.B));
+        if (max == 0)
+        {
+            return global::Windows.UI.Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF);
+        }
+
+        var scale = 255d / max;
+        return global::Windows.UI.Color.FromArgb(
+            0xFF,
+            (byte)Math.Clamp(Math.Round(color.R * scale), 0, 255),
+            (byte)Math.Clamp(Math.Round(color.G * scale), 0, 255),
+            (byte)Math.Clamp(Math.Round(color.B * scale), 0, 255));
+    }
+
+    private static global::Windows.UI.Color ApplyGaugeBrightness(global::Windows.UI.Color color, double brightness)
+    {
+        var value = Math.Clamp(brightness, 0, 1);
+        return global::Windows.UI.Color.FromArgb(
+            0xFF,
+            (byte)Math.Clamp(Math.Round(color.R * value), 0, 255),
+            (byte)Math.Clamp(Math.Round(color.G * value), 0, 255),
+            (byte)Math.Clamp(Math.Round(color.B * value), 0, 255));
+    }
+
+    private void UpdateGaugeColorButton(global::Windows.UI.Color color)
+    {
+        GaugeColorButton.Content = Text("Choose", "\uC120\uD0DD");
+        GaugeColorButton.Background = new SolidColorBrush(color);
+        var luminance = (0.2126 * color.R) + (0.7152 * color.G) + (0.0722 * color.B);
+        GaugeColorButton.Foreground = luminance >= 150
+            ? Brush(0xFF, 0x20, 0x20, 0x20)
+            : Brush(0xFF, 0xFF, 0xFF, 0xFF);
+    }
+
+    private static global::Windows.UI.Color LightenGaugeColor(global::Windows.UI.Color color, double amount)
+    {
+        byte Blend(byte channel) => (byte)Math.Clamp(
+            Math.Round(channel + ((255 - channel) * amount)),
+            byte.MinValue,
+            byte.MaxValue);
+        return global::Windows.UI.Color.FromArgb(0xFF, Blend(color.R), Blend(color.G), Blend(color.B));
+    }
+
+    private void ApplyStylePreview()
+    {
+        if (StylePreviewTrackRoot is null
+            || GaugeThicknessComboBox?.SelectedItem is null
+            || GaugeAnimationComboBox?.SelectedItem is null)
+        {
+            return;
+        }
+
+        var style = ReadStyleSelection();
+        ApplyGaugeAppearance(StylePreviewTrackRoot, StylePreviewFillBar, StylePreviewSweepBar, style);
+        var animated = style.GaugeAnimation != "off";
+        ApplyActiveBarProgress(
+            StylePreviewTrackRoot,
+            StylePreviewFillBar,
+            StylePreviewSweepBar,
+            68,
+            68,
+            EaseSweep(_stylePreviewSweepPhase),
+            animated);
+    }
+
+    private void AddInstallMethodItem(string content, string value) =>
+        CodexInstallMethodComboBox.Items.Add(new ComboBoxItem { Content = content, Tag = value });
+
+    private string ReadSelectedCodexInstallMethod()
+    {
+        return CodexInstallMethodComboBox.SelectedItem is ComboBoxItem { Tag: string method }
+            ? CodexInstallMethodNames.Normalize(method)
+            : CodexInstallMethodNames.Auto;
+    }
+
+    private void SelectCodexInstallMethod(string? installMethod)
+    {
+        var normalized = CodexInstallMethodNames.Normalize(installMethod);
+        foreach (var item in CodexInstallMethodComboBox.Items.OfType<ComboBoxItem>())
+        {
+            if (item.Tag is string value && string.Equals(value, normalized, StringComparison.OrdinalIgnoreCase))
+            {
+                CodexInstallMethodComboBox.SelectedItem = item;
+                return;
+            }
+        }
+
+        CodexInstallMethodComboBox.SelectedIndex = 0;
+    }
+
+    private void ApplyCustomUpdateCommandVisibility()
+    {
+        var visible = ReadSelectedCodexInstallMethod() == CodexInstallMethodNames.Custom
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        CustomCodexUpdateCommandLabelText.Visibility = visible;
+        CustomCodexUpdateCommandTextBox.Visibility = visible;
+        UpdateCodexUpdateCommandPreview();
+    }
+
+    private void UpdateCodexUpdateCommandPreview()
+    {
+        var selectedMethod = ReadSelectedCodexInstallMethod();
+        var effectiveMethod = selectedMethod == CodexInstallMethodNames.Auto
+            ? _lastCodexVersionCheck?.DetectedInstallMethod ?? CodexInstallMethodNames.PowerShell
+            : selectedMethod;
+        var target = _lastCodexVersionCheck?.LatestVersion
+            ?? _lastCodexVersionCheck?.RequiredVersion
+            ?? CodexVersionPolicy.MinimumRequiredVersion;
+        try
+        {
+            var command = CodexCliUpdateService.BuildUpdateCommand(
+                effectiveMethod,
+                CustomCodexUpdateCommandTextBox.Text,
+                target);
+            CodexUpdateCommandPreviewText.Text = Text("Command: ", "명령: ") + command.Arguments[^1];
+        }
+        catch (InvalidOperationException)
+        {
+            CodexUpdateCommandPreviewText.Text = Text(
+                "Enter a custom update command.",
+                "사용자 지정 업데이트 명령을 입력하세요.");
+        }
+    }
+
+    private void UpdateCodexVersionStatusText(
+        CodexVersionCheckResult? result,
+        bool checking = false,
+        string? checkError = null)
+    {
+        var current = checking
+            ? Text("Checking...", "확인 중...")
+            : checkError is not null
+                ? Text("Check failed", "확인 실패")
+                : result?.Status == CodexVersionStatus.Missing
+                    ? Text("Not installed", "설치되지 않음")
+                    : result?.InstalledVersion?.ToString()
+                        ?? Text("Waiting for startup check", "시작 확인 대기 중");
+        CurrentCodexVersionText.Text = $"{Text("Current Codex CLI", "현재 Codex CLI")}\n{current}";
+        UpdateCodexUpdateCommandPreview();
+    }
+
     private void ApplyLanguage()
     {
-        Title = SettingsView.Visibility == Visibility.Visible ? Text("WindexBar Settings", "WindexBar \uC124\uC815") : "WindexBar";
+        Title = SettingsView.Visibility == Visibility.Visible
+            ? Text("WindexBar Settings", "WindexBar \uC124\uC815")
+            : StyleView.Visibility == Visibility.Visible
+                ? Text("WindexBar Style", "WindexBar \uC2A4\uD0C0\uC77C")
+                : "WindexBar";
         ApplyWindowSectionLabels();
         AccountLabelText.Text = Text("Account", "\uACC4\uC815");
         SetSideBarButtonText(HomeButton, "\u2302");
         SetSideBarButtonText(SessionsButton, "\u2637");
         SetSideBarButtonText(CreditsButton, "$");
+        SetSideBarButtonText(StyleButton, "\u25C8");
         SetSideBarButtonText(SettingsButton, "\u2699");
         SetSideBarButtonText(ResetCreditDetailsButton, "\u21BB");
         foreach (var quitButton in _quitButtons)
@@ -1352,15 +2437,28 @@ public sealed partial class MainWindow : Window
         }
         CreditsTitleText.Text = Text("Credits", "\uD06C\uB808\uB527");
         ResetCreditDetailsTitleText.Text = Text("Reset credit details", "\uCD08\uAE30\uD654\uAD8C \uC0C1\uC138");
+        StyleTitleText.Text = Text("Style", "\uC2A4\uD0C0\uC77C");
+        GaugeThicknessLabelText.Text = Text("Gauge thickness", "\uAC8C\uC774\uC9C0 \uB450\uAED8");
+        GaugeColorLabelText.Text = Text("Gauge color", "\uAC8C\uC774\uC9C0 \uC0C9\uC0C1");
+        GaugeAnimationLabelText.Text = Text("Animation", "\uC560\uB2C8\uBA54\uC774\uC158");
         SettingsTitleText.Text = Text("Settings", "\uC124\uC815");
         RefreshIntervalLabelText.Text = Text("Refresh interval", "\uC0C8\uB85C\uACE0\uCE68 \uAC04\uACA9");
         SecondsLabelText.Text = Text("s", "\uCD08");
         LanguageLabelText.Text = Text("Language", "\uC5B8\uC5B4");
         ToggleHotkeyLabelText.Text = Text("Toggle shortcut", "\uD1A0\uAE00 \uB2E8\uCD95\uD0A4");
         ToggleSidebarHotkeyLabelText.Text = Text("Sidebar shortcut", "\uC0AC\uC774\uB4DC\uBC14 \uB2E8\uCD95\uD0A4");
+        CodexInstallMethodLabelText.Text = Text("Codex install method", "Codex 설치 방식");
+        CustomCodexUpdateCommandLabelText.Text = Text("Custom update command", "사용자 지정 업데이트 명령");
+        CustomCodexUpdateCommandTextBox.PlaceholderText = Text(
+            "Enter a Codex CLI update command.",
+            "Codex CLI 업데이트 명령을 입력하세요.");
+        CheckCodexVersionButton.Content = Text("Check now", "지금 확인");
         StartWithWindowsCheckBox.Content = Text("Start with Windows", "Windows \uC2DC\uC791 \uC2DC \uC2E4\uD589");
         AutoShowWithCodexCheckBox.Content = Text("Show only while using ChatGPT or Codex", "ChatGPT \uB610\uB294 Codex \uC0AC\uC6A9 \uC911\uC5D0\uB9CC \uD45C\uC2DC");
         SaveSettingsButton.Content = Text("Save", "\uC800\uC7A5");
+        SaveStyleButton.Content = Text("Save", "\uC800\uC7A5");
+        UpdateGaugeColorButton(_selectedGaugeColor);
+        UpdateCodexVersionStatusText(_lastCodexVersionCheck);
         UpdateSessionSortToggleAppearance();
     }
 
@@ -1384,18 +2482,37 @@ public sealed partial class MainWindow : Window
 
     private void ApplyProgressBarTheme()
     {
-        ApplyProgressBarTheme(CurrentWindowFillBar, CurrentWindowSweepBar, _isFastServiceTier);
-        ApplyProgressBarTheme(WeeklyWindowFillBar, WeeklyWindowSweepBar, _isFastServiceTier);
+        var style = _settingsStore.Config.Style.Normalized();
+        ApplyGaugeAppearance(CurrentWindowTrackRoot, CurrentWindowFillBar, CurrentWindowSweepBar, style);
+        ApplyGaugeAppearance(WeeklyWindowTrackRoot, WeeklyWindowFillBar, WeeklyWindowSweepBar, style);
+        foreach (var sessionBar in _sessionUsageBars)
+        {
+            ApplyGaugeAppearance(sessionBar.TrackRoot, sessionBar.FillBar, sessionBar.SweepBar, style);
+        }
     }
 
-    private static void ApplyProgressBarTheme(Border fillBar, Border sweepBar, bool isFast)
+    private static void ApplyGaugeAppearance(
+        Grid trackRoot,
+        Border fillBar,
+        Border sweepBar,
+        StyleConfig style)
     {
-        fillBar.Background = isFast
-            ? Brush(0xFF, 0xD7, 0x56, 0x7D)
-            : Brush(0xFF, 0x8D, 0x78, 0xD6);
-        sweepBar.Background = isFast
-            ? Brush(0xFF, 0xFF, 0x9D, 0xB2)
-            : Brush(0xFF, 0xC8, 0xB9, 0xFF);
+        var thickness = StyleConfig.NormalizeGaugeThickness(style.GaugeThickness) switch
+        {
+            "thin" => 4d,
+            "thick" => 9d,
+            _ => 6d
+        };
+        var radius = new CornerRadius(thickness / 2d);
+        trackRoot.Height = thickness;
+        foreach (var border in trackRoot.Children.OfType<Border>())
+        {
+            border.CornerRadius = radius;
+        }
+
+        var color = ParseGaugeColor(style.GaugeColor);
+        fillBar.Background = new SolidColorBrush(color);
+        sweepBar.Background = new SolidColorBrush(LightenGaugeColor(color, 0.45));
     }
 
     private static bool IsFastServiceTier(CodexModelSelection? activeModel) =>
@@ -1896,6 +3013,7 @@ public sealed partial class MainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Left
         };
         track.Children.Add(sweep);
+        ApplyGaugeAppearance(track, fill, sweep, _settingsStore.Config.Style.Normalized());
         _sessionUsageBars.Add(new SessionUsageBarView(sessionId, track, fill, sweep, currentValue, targetValue));
         return track;
     }

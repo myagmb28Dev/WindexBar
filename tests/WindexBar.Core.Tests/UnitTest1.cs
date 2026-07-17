@@ -600,6 +600,44 @@ public sealed class ConfigTests
         Assert.Equal(WindexBarConfig.DefaultToggleSidebarHotkey, reloaded.Hotkeys.ToggleSidebar);
         Assert.True(reloaded.StartWithWindows);
         Assert.False(reloaded.AutoShowWithCodex);
+        Assert.Equal(StyleConfig.DefaultGaugeThickness, reloaded.Style.GaugeThickness);
+        Assert.Equal(StyleConfig.DefaultGaugeColor, reloaded.Style.GaugeColor);
+        Assert.Equal(StyleConfig.DefaultGaugeAnimation, reloaded.Style.GaugeAnimation);
+    }
+
+    [Fact]
+    public void PreservesAndNormalizesGaugeStylePreferences()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
+        var store = new WindexBarConfigStore(path);
+        var config = store.LoadOrCreateDefault();
+        config.Style.GaugeThickness = "THICK";
+        config.Style.GaugeColor = "#4f9dff";
+        config.Style.GaugeAnimation = "off";
+        store.Save(config);
+
+        var reloaded = store.LoadOrCreateDefault();
+
+        Assert.Equal("thick", reloaded.Style.GaugeThickness);
+        Assert.Equal("#4F9DFF", reloaded.Style.GaugeColor);
+        Assert.Equal("off", reloaded.Style.GaugeAnimation);
+    }
+
+    [Fact]
+    public void InvalidGaugeStylePreferencesFallBackToDefaults()
+    {
+        var config = new StyleConfig
+        {
+            GaugeThickness = "huge",
+            GaugeColor = "not-a-color",
+            GaugeAnimation = "bounce"
+        };
+
+        config.Normalized();
+
+        Assert.Equal(StyleConfig.DefaultGaugeThickness, config.GaugeThickness);
+        Assert.Equal(StyleConfig.DefaultGaugeColor, config.GaugeColor);
+        Assert.Equal(StyleConfig.DefaultGaugeAnimation, config.GaugeAnimation);
     }
 
     [Fact]
@@ -642,6 +680,40 @@ public sealed class ConfigTests
         var reloaded = store.LoadOrCreateDefault();
 
         Assert.True(reloaded.AutoShowWithCodex);
+    }
+
+    [Fact]
+    public void PreservesCodexUpdatePreferencesAndCache()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
+        var store = new WindexBarConfigStore(path);
+        var config = store.LoadOrCreateDefault();
+        var checkedAt = new DateTimeOffset(2026, 7, 17, 1, 2, 3, TimeSpan.Zero);
+        config.CodexUpdates.InstallMethod = CodexInstallMethodNames.Bun;
+        config.CodexUpdates.AutomaticallyUpdate = true;
+        config.CodexUpdates.CustomCommand = "custom-update {latestVersion}";
+        config.CodexUpdates.LatestVersion = "0.144.5";
+        config.CodexUpdates.LastCheckedAt = checkedAt;
+        store.Save(config);
+
+        var reloaded = store.LoadOrCreateDefault();
+
+        Assert.Equal(CodexInstallMethodNames.Bun, reloaded.CodexUpdates.InstallMethod);
+        Assert.True(reloaded.CodexUpdates.AutomaticallyUpdate);
+        Assert.Equal("custom-update {latestVersion}", reloaded.CodexUpdates.CustomCommand);
+        Assert.Equal("0.144.5", reloaded.CodexUpdates.LatestVersion);
+        Assert.Equal(checkedAt, reloaded.CodexUpdates.LastCheckedAt);
+    }
+
+    [Fact]
+    public void CodexAutomaticUpdatesAreAlwaysEnabled()
+    {
+        var config = new CodexUpdateConfig { AutomaticallyUpdate = false };
+
+        config.Normalized();
+
+        Assert.True(config.AutomaticallyUpdate);
+        Assert.True(new CodexUpdateConfig().AutomaticallyUpdate);
     }
 
     [Fact]

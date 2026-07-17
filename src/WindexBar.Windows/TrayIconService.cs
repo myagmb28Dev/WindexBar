@@ -4,6 +4,7 @@ using WindexBar.Core.Formatting;
 using WindexBar.Core.Models;
 using WindexBar.Core.Refresh;
 using WindexBar.Core.Windowing;
+using WindexBar.Core.Updates;
 using Microsoft.UI.Dispatching;
 using Drawing = System.Drawing;
 using Forms = System.Windows.Forms;
@@ -17,6 +18,7 @@ public sealed class TrayIconService : IDisposable
 
     private readonly SettingsStore _settingsStore;
     private readonly UsageStore _usageStore;
+    private readonly CodexCliUpdateService _codexCliUpdateService;
     private readonly DispatcherQueue _dispatcher;
     private readonly Forms.NotifyIcon _notifyIcon;
     private readonly Drawing.Icon _defaultIcon;
@@ -27,10 +29,15 @@ public sealed class TrayIconService : IDisposable
     private string? _uiError;
     private bool _disposed;
 
-    public TrayIconService(SettingsStore settingsStore, UsageStore usageStore, DispatcherQueue dispatcher)
+    public TrayIconService(
+        SettingsStore settingsStore,
+        UsageStore usageStore,
+        CodexCliUpdateService codexCliUpdateService,
+        DispatcherQueue dispatcher)
     {
         _settingsStore = settingsStore;
         _usageStore = usageStore;
+        _codexCliUpdateService = codexCliUpdateService;
         _dispatcher = dispatcher;
         _defaultIcon = LoadIcon();
         _notifyIcon = new Forms.NotifyIcon
@@ -145,7 +152,7 @@ public sealed class TrayIconService : IDisposable
     {
         if (_statusWindow is null)
         {
-            _statusWindow = new MainWindow(_usageStore, _settingsStore);
+            _statusWindow = new MainWindow(_usageStore, _settingsStore, _codexCliUpdateService);
             _statusWindow.Closed += (_, _) =>
             {
                 LogMessage("WindexBar window closed.");
