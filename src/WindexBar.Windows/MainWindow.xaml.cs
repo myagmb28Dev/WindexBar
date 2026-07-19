@@ -27,6 +27,11 @@ public sealed partial class MainWindow : Window
     private const double SideBarExpandedGap = 7;
     private const double SideBarOuterWidth = SideBarExpandedWidth + SideBarExpandedGap;
     private const double SideBarVisualWidth = SideBarOuterWidth + 10;
+    private const double SideBarButtonHeight = 32;
+    private const double SideBarButtonSpacing = 7;
+    private const int SideBarButtonCount = 6;
+    private const double SideBarNaturalHeight =
+        (SideBarButtonHeight * SideBarButtonCount) + (SideBarButtonSpacing * (SideBarButtonCount - 1));
     private const double StandardBarSweepStep = 0.035;
     private const double FastBarSweepStep = 0.075;
     private const double StandardBarEaseFactor = 0.16;
@@ -62,7 +67,7 @@ public sealed partial class MainWindow : Window
     private Grid ContentRootGrid = null!;
     private Grid SideBarHost = null!;
     private ColumnDefinition SideBarColumn = null!;
-    private StackPanel SideBarPanel = null!;
+    private Grid SideBarPanel = null!;
     private Border HudView = null!;
     private Border SessionsView = null!;
     private Border CreditsView = null!;
@@ -256,39 +261,57 @@ public sealed partial class MainWindow : Window
         };
         Grid.SetRow(SideBarHost, 1);
 
-        SideBarPanel = new StackPanel
+        SideBarPanel = new Grid
         {
-            Orientation = Orientation.Vertical,
-            Spacing = 7,
+            RowSpacing = SideBarButtonSpacing,
             VerticalAlignment = VerticalAlignment.Top,
             HorizontalAlignment = HorizontalAlignment.Left,
             Width = SideBarVisualWidth,
             Opacity = 0.72
         };
+        for (var row = 0; row < SideBarButtonCount; row++)
+        {
+            SideBarPanel.RowDefinitions.Add(new RowDefinition
+            {
+                Height = new GridLength(1, GridUnitType.Star)
+            });
+        }
+
+        SideBarHost.SizeChanged += (_, args) =>
+        {
+            var availableHeight = Math.Max(0, args.NewSize.Height - SideBarButtonSpacing);
+            SideBarPanel.Height = Math.Min(SideBarNaturalHeight, availableHeight);
+        };
         SideBarHost.Children.Add(SideBarPanel);
 
         HomeButton = CreateSideBarButton("\u2302");
         HomeButton.Click += HomeButton_Click;
+        Grid.SetRow(HomeButton, 0);
         SideBarPanel.Children.Add(HomeButton);
 
         SessionsButton = CreateSideBarButton("\u2637");
         SessionsButton.Click += SessionsButton_Click;
+        Grid.SetRow(SessionsButton, 1);
         SideBarPanel.Children.Add(SessionsButton);
 
         CreditsButton = CreateSideBarButton("$");
         CreditsButton.Click += CreditsButton_Click;
+        Grid.SetRow(CreditsButton, 2);
         SideBarPanel.Children.Add(CreditsButton);
 
         ResetCreditDetailsButton = CreateSideBarButton("\u21BB");
         ResetCreditDetailsButton.Click += ResetCreditDetailsButton_Click;
+        Grid.SetRow(ResetCreditDetailsButton, 3);
         SideBarPanel.Children.Add(ResetCreditDetailsButton);
 
         StyleButton = CreateSideBarButton("\u25C8");
         StyleButton.Click += StyleButton_Click;
+        Grid.SetRow(StyleButton, 4);
         SideBarPanel.Children.Add(StyleButton);
 
         SettingsButton = CreateSideBarButton("\u2699");
         SettingsButton.Click += SettingsButton_Click;
+        Grid.SetRow(SettingsButton, 5);
         SideBarPanel.Children.Add(SettingsButton);
 
         HudView = new Border
@@ -599,11 +622,12 @@ public sealed partial class MainWindow : Window
         return new Button
         {
             Content = buttonContent,
-            Width = 32,
-            Height = 32,
-            MinWidth = 32,
-            MinHeight = 32,
+            Width = SideBarButtonHeight,
+            MaxHeight = SideBarButtonHeight,
+            MinWidth = SideBarButtonHeight,
+            MinHeight = 0,
             HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center,
             Padding = new Thickness(0),
