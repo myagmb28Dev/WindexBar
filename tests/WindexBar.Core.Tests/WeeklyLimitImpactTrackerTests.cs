@@ -109,6 +109,84 @@ public sealed class WeeklyLimitImpactTrackerTests
         Assert.Equal(3, Assert.Single(result.Sessions!).WeeklyLimitImpactPercent);
     }
 
+    [Fact]
+    public void PreservesAccumulatedImpactWhenTheReportedUsageDropsTemporarily()
+    {
+        var store = new MemoryStateStore();
+        var tracker = new WeeklyLimitImpactTracker(store);
+        tracker.Apply(Snapshot(10, Session("a", 100_000, @"D:\Codes\ProjectA")));
+        tracker.Apply(Snapshot(13, Session("a", 221_000, @"D:\Codes\ProjectA")));
+
+        var corrected = tracker.Apply(Snapshot(11, Session("a", 230_000, @"D:\Codes\ProjectA")));
+        var recovered = tracker.Apply(Snapshot(14, Session("a", 240_000, @"D:\Codes\ProjectA")));
+
+        Assert.Equal(3, Assert.Single(corrected.Sessions!).WeeklyLimitImpactPercent);
+        Assert.Equal(4, Assert.Single(recovered.Sessions!).WeeklyLimitImpactPercent);
+    }
+
+    [Fact]
+    public void PreservesAccumulatedImpactWhenTheReportedResetTimeMoves()
+    {
+        var tracker = new WeeklyLimitImpactTracker(new MemoryStateStore());
+        tracker.Apply(Snapshot(10, Session("a", 100_000, @"D:\Codes\ProjectA")));
+        tracker.Apply(Snapshot(13, Session("a", 221_000, @"D:\Codes\ProjectA")));
+
+        var result = tracker.Apply(Snapshot(
+            13,
+            ResetAt.AddMinutes(10),
+            Session("a", 221_000, @"D:\Codes\ProjectA")));
+
+        Assert.Equal(3, Assert.Single(result.Sessions!).WeeklyLimitImpactPercent);
+    }
+
+    [Fact]
+    public void PrefersTheStableAccountWindowOverChangingModelWindows()
+    {
+        var store = new MemoryStateStore();
+        var tracker = new WeeklyLimitImpactTracker(store);
+        tracker.Apply(SnapshotWithModelWindow(10, "gpt-a", Session("a", 100_000, @"D:\Codes\ProjectA")));
+        tracker.Apply(SnapshotWithModelWindow(13, "gpt-a", Session("a", 221_000, @"D:\Codes\ProjectA")));
+
+        var result = tracker.Apply(SnapshotWithModelWindow(
+            13,
+            "gpt-b",
+            Session("a", 221_000, @"D:\Codes\ProjectA")));
+
+        Assert.Equal(3, Assert.Single(result.Sessions!).WeeklyLimitImpactPercent);
+        Assert.Equal("account|10080", store.State.WindowId);
+    }
+
+    [Fact]
+    public void PreservesImpactWhenAStartupModelWindowBecomesTheAccountWindow()
+    {
+        var tracker = new WeeklyLimitImpactTracker(new MemoryStateStore());
+        tracker.Apply(SnapshotWithOnlyModelWindow(10, Session("a", 100_000, @"D:\Codes\ProjectA")));
+        tracker.Apply(SnapshotWithOnlyModelWindow(13, Session("a", 221_000, @"D:\Codes\ProjectA")));
+
+        var result = tracker.Apply(Snapshot(13, Session("a", 221_000, @"D:\Codes\ProjectA")));
+
+        Assert.Equal(3, Assert.Single(result.Sessions!).WeeklyLimitImpactPercent);
+    }
+
+    [Fact]
+    public void MigratesTheLegacyResetTimestampWindowIdWithoutLosingImpact()
+    {
+        var store = new MemoryStateStore(new WeeklyLimitImpactState
+        {
+            WindowId = $"model:Codex|10080|{ResetAt:O}",
+            LastUsedPercent = 13,
+            LastSessionTokens = new Dictionary<string, long> { ["a"] = 221_000 },
+            SessionImpacts = new Dictionary<string, double> { ["a"] = 3 }
+        });
+
+        var result = new WeeklyLimitImpactTracker(store).Apply(
+            Snapshot(13, Session("a", 221_000, @"D:\Codes\ProjectA")));
+
+        Assert.Equal(3, Assert.Single(result.Sessions!).WeeklyLimitImpactPercent);
+        Assert.Equal("account|10080", store.State.WindowId);
+        Assert.Equal(ResetAt, store.State.WindowResetsAt);
+    }
+
     private static UsageSnapshot Snapshot(double weeklyUsedPercent, params CodexSessionUsageSnapshot[] sessions) =>
         Snapshot(weeklyUsedPercent, ResetAt, sessions);
 
@@ -124,6 +202,40 @@ public sealed class WeeklyLimitImpactTrackerTests
             null,
             Sessions: sessions);
 
+    private static UsageSnapshot SnapshotWithModelWindow(
+        double weeklyUsedPercent,
+        string activeModel,
+        params CodexSessionUsageSnapshot[] sessions)
+    {
+        var accountWeekly = new RateWindow(weeklyUsedPercent, 10_080, ResetAt, null);
+        var modelWeekly = new RateWindow(weeklyUsedPercent, 10_080, ResetAt.AddMinutes(5), null);
+        return new UsageSnapshot(
+            new RateWindow(5, 300, ResetAt.AddDays(-6), null),
+            accountWeekly,
+            null,
+            ResetAt.AddDays(-1),
+            null,
+            Models: [new ModelUsageSnapshot(activeModel, null, modelWeekly)],
+            ActiveModel: new CodexModelSelection(activeModel, null, null, activeModel, ResetAt.AddDays(-1)),
+            Sessions: sessions);
+    }
+
+    private static UsageSnapshot SnapshotWithOnlyModelWindow(
+        double weeklyUsedPercent,
+        params CodexSessionUsageSnapshot[] sessions) =>
+        new(
+            new RateWindow(5, 300, ResetAt.AddDays(-6), null),
+            null,
+            null,
+            ResetAt.AddDays(-1),
+            null,
+            Models: [new ModelUsageSnapshot(
+                "Codex",
+                null,
+                new RateWindow(weeklyUsedPercent, 10_080, ResetAt, null))],
+            ActiveModel: new CodexModelSelection("Codex", null, null, "Codex", ResetAt.AddDays(-1)),
+            Sessions: sessions);
+
     private static CodexSessionUsageSnapshot Session(string id, long tokens, string projectPath) =>
         new(
             id,
@@ -136,9 +248,9 @@ public sealed class WeeklyLimitImpactTrackerTests
                 ResetAt.AddDays(-1)),
             ResetAt.AddDays(-1));
 
-    private sealed class MemoryStateStore : IWeeklyLimitImpactStateStore
+    private sealed class MemoryStateStore(WeeklyLimitImpactState? state = null) : IWeeklyLimitImpactStateStore
     {
-        public WeeklyLimitImpactState State { get; private set; } = new();
+        public WeeklyLimitImpactState State { get; private set; } = state ?? new();
 
         public WeeklyLimitImpactState Load() => State;
 

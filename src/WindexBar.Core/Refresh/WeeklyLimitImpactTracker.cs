@@ -7,6 +7,7 @@ namespace WindexBar.Core.Refresh;
 public sealed class WeeklyLimitImpactState
 {
     public string? WindowId { get; set; }
+    public DateTimeOffset? WindowResetsAt { get; set; }
     public double? LastUsedPercent { get; set; }
     public Dictionary<string, long> LastSessionTokens { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, long> PendingSessionTokens { get; set; } = new(StringComparer.OrdinalIgnoreCase);
@@ -82,13 +83,16 @@ public sealed class WeeklyLimitImpactTracker
     {
         var sessions = snapshot.Sessions ?? [];
         var selectedModel = HudDisplayModelFactory.FindCurrentSessionModel(snapshot.Models, snapshot.ActiveModel);
-        var weekly = selectedModel?.Weekly ?? snapshot.Secondary;
+        var accountWeekly = snapshot.Secondary;
+        var weekly = accountWeekly ?? selectedModel?.Weekly;
         if (weekly is null)
         {
             return snapshot;
         }
 
-        var sourceKey = selectedModel is null ? "account" : $"model:{selectedModel.ModelName.Trim()}";
+        var sourceKey = accountWeekly is not null
+            ? "account"
+            : $"model:{selectedModel!.ModelName.Trim()}";
         var windowId = CreateWindowId(sourceKey, weekly);
         var currentTokens = sessions
             .GroupBy(session => session.SessionId, StringComparer.OrdinalIgnoreCase)
@@ -98,11 +102,12 @@ public sealed class WeeklyLimitImpactTracker
                 StringComparer.OrdinalIgnoreCase);
         if (!string.Equals(_state.WindowId, windowId, StringComparison.Ordinal)
             || _state.LastUsedPercent is null
-            || weekly.UsedPercent + PercentTolerance < _state.LastUsedPercent.Value)
+            || HasWindowRolledOver(_state.WindowResetsAt, weekly.ResetsAt, snapshot.UpdatedAt))
         {
             _state = new WeeklyLimitImpactState
             {
                 WindowId = windowId,
+                WindowResetsAt = weekly.ResetsAt,
                 LastUsedPercent = weekly.UsedPercent,
                 LastSessionTokens = currentTokens
             };
@@ -111,6 +116,12 @@ public sealed class WeeklyLimitImpactTracker
         }
 
         var stateChanged = false;
+        if (_state.WindowResetsAt is null && weekly.ResetsAt is not null)
+        {
+            _state.WindowResetsAt = weekly.ResetsAt;
+            stateChanged = true;
+        }
+
         foreach (var (sessionId, totalTokens) in currentTokens)
         {
             if (_state.LastSessionTokens.TryGetValue(sessionId, out var previousTokens)
@@ -137,7 +148,7 @@ public sealed class WeeklyLimitImpactTracker
         }
 
         _state.WindowId = windowId;
-        if (Math.Abs(usedPercentDelta) > PercentTolerance)
+        if (usedPercentDelta > PercentTolerance)
         {
             _state.LastUsedPercent = weekly.UsedPercent;
             stateChanged = true;
@@ -184,11 +195,22 @@ public sealed class WeeklyLimitImpactTracker
         return snapshot with { Sessions = enriched };
     }
 
-    private static string CreateWindowId(string sourceKey, RateWindow weekly)
-    {
-        var reset = weekly.ResetsAt?.ToUniversalTime().ToString("O") ?? "unknown-reset";
-        return $"{sourceKey}|{weekly.WindowMinutes?.ToString() ?? "unknown-duration"}|{reset}";
-    }
+    private static string CreateWindowId(string sourceKey, RateWindow weekly) =>
+        $"{NormalizeSourceKey(sourceKey)}|{weekly.WindowMinutes?.ToString() ?? "unknown-duration"}";
+
+    private static string NormalizeSourceKey(string sourceKey) =>
+        string.Equals(sourceKey, "model:Codex", StringComparison.OrdinalIgnoreCase)
+            ? "account"
+            : sourceKey;
+
+    private static bool HasWindowRolledOver(
+        DateTimeOffset? previousReset,
+        DateTimeOffset? currentReset,
+        DateTimeOffset observedAt) =>
+        previousReset is { } previous
+        && currentReset is { } current
+        && observedAt >= previous
+        && current > previous;
 
     private static long SessionTotalTokens(CodexSessionUsageSnapshot session) =>
         session.TokenUsage.Total?.TotalTokens
@@ -203,6 +225,18 @@ public sealed class WeeklyLimitImpactTracker
 
     private static WeeklyLimitImpactState Normalize(WeeklyLimitImpactState state)
     {
+        var windowParts = state.WindowId?.Split('|', 3);
+        if (windowParts is { Length: >= 2 })
+        {
+            state.WindowId = $"{NormalizeSourceKey(windowParts[0])}|{windowParts[1]}";
+            if (state.WindowResetsAt is null
+                && windowParts.Length == 3
+                && DateTimeOffset.TryParse(windowParts[2], out var legacyReset))
+            {
+                state.WindowResetsAt = legacyReset;
+            }
+        }
+
         state.LastSessionTokens = Copy(state.LastSessionTokens);
         state.PendingSessionTokens = Copy(state.PendingSessionTokens);
         state.SessionImpacts = Copy(state.SessionImpacts);
