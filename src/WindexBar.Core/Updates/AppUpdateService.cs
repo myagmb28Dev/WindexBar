@@ -185,7 +185,7 @@ public sealed class AppUpdateService(
     IAppUpdateManifestVerifier manifestVerifier,
     Func<DateTimeOffset>? now = null)
 {
-    public static readonly TimeSpan CheckInterval = TimeSpan.FromHours(24);
+    public static readonly TimeSpan CheckInterval = TimeSpan.FromMinutes(15);
     public static readonly TimeSpan FailureRetryDelay = TimeSpan.FromHours(24);
     private readonly Func<DateTimeOffset> _now = now ?? (() => DateTimeOffset.UtcNow);
 
