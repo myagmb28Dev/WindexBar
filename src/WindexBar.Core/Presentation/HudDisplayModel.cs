@@ -104,7 +104,7 @@ public static class HudDisplayModelFactory
             : $"{identity.AccountEmail} ({identity.LoginMethod})";
     }
 
-    private static ModelUsageSnapshot? FindCurrentSessionModel(
+    internal static ModelUsageSnapshot? FindCurrentSessionModel(
         IReadOnlyList<ModelUsageSnapshot>? models,
         CodexModelSelection? activeModel)
     {
