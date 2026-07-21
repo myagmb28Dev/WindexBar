@@ -5,7 +5,7 @@ namespace WindexBar.Core.Config;
 
 public sealed class WindexBarConfig
 {
-    public const int CurrentVersion = 6;
+    public const int CurrentVersion = 7;
     public const int MinRefreshIntervalSeconds = 1;
     public const int DefaultRefreshIntervalSeconds = 30;
     public const int MaxRefreshIntervalSeconds = 3600;
@@ -39,6 +39,9 @@ public sealed class WindexBarConfig
     [JsonPropertyName("codexUpdates")]
     public CodexUpdateConfig CodexUpdates { get; set; } = new();
 
+    [JsonPropertyName("appUpdates")]
+    public AppUpdateConfig AppUpdates { get; set; } = new();
+
     [JsonPropertyName("style")]
     public StyleConfig Style { get; set; } = new();
 
@@ -50,6 +53,7 @@ public sealed class WindexBarConfig
         Language = NormalizeLanguage(Language);
         Hotkeys = (Hotkeys ?? new HotkeyConfig()).Normalized();
         CodexUpdates = (CodexUpdates ?? new CodexUpdateConfig()).Normalized();
+        AppUpdates = (AppUpdates ?? new AppUpdateConfig()).Normalized();
         Style = (Style ?? new StyleConfig()).Normalized();
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -99,6 +103,38 @@ public sealed class WindexBarConfig
 
         Providers.Add(value.Normalized());
     }
+}
+
+public sealed class AppUpdateConfig
+{
+    [JsonPropertyName("automaticallyUpdate")]
+    public bool AutomaticallyUpdate { get; set; } = true;
+
+    [JsonPropertyName("latestVersion")]
+    public string? LatestVersion { get; set; }
+
+    [JsonPropertyName("lastCheckedAt")]
+    public DateTimeOffset? LastCheckedAt { get; set; }
+
+    [JsonPropertyName("pendingVersion")]
+    public string? PendingVersion { get; set; }
+
+    [JsonPropertyName("retryAfter")]
+    public DateTimeOffset? RetryAfter { get; set; }
+
+    [JsonPropertyName("lastFailure")]
+    public string? LastFailure { get; set; }
+
+    public AppUpdateConfig Normalized()
+    {
+        LatestVersion = NormalizeText(LatestVersion);
+        PendingVersion = NormalizeText(PendingVersion);
+        LastFailure = NormalizeText(LastFailure);
+        return this;
+    }
+
+    private static string? NormalizeText(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }
 
 public sealed class StyleConfig

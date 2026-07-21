@@ -92,6 +92,16 @@ public sealed class TrayIconService : IDisposable
         });
     }
 
+    public void ShowError(string title, string message)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _notifyIcon.ShowBalloonTip(10000, title, message, Forms.ToolTipIcon.Error);
+    }
+
     public void ToggleStatusWindow()
     {
         if (_disposed)
