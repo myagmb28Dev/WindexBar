@@ -785,8 +785,19 @@ public sealed partial class MainWindow : Window
     private void OnScrollNavigationKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
     {
         var scrollViewer = VisibleScrollViewer();
-        if (scrollViewer is null
-            || scrollViewer.ScrollableHeight <= 0
+        if (scrollViewer is null)
+        {
+            return;
+        }
+
+        HandleScrollNavigationKeyDown(scrollViewer, e);
+    }
+
+    private static void HandleScrollNavigationKeyDown(
+        ScrollViewer scrollViewer,
+        Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
+    {
+        if (scrollViewer.ScrollableHeight <= 0
             || IsArrowKeyInputControl(e.OriginalSource as DependencyObject))
         {
             return;
@@ -819,6 +830,23 @@ public sealed partial class MainWindow : Window
                 e.Handled = true;
                 break;
         }
+    }
+
+    private static void AttachPopupScrollInput(FrameworkElement root, ScrollViewer scrollViewer)
+    {
+        scrollViewer.IsTabStop = true;
+        scrollViewer.PointerPressed += (_, _) => scrollViewer.Focus(FocusState.Pointer);
+        scrollViewer.Loaded += (_, _) => scrollViewer.Focus(FocusState.Programmatic);
+        root.AddHandler(
+            UIElement.KeyDownEvent,
+            new KeyEventHandler((_, e) =>
+            {
+                if (!e.Handled)
+                {
+                    HandleScrollNavigationKeyDown(scrollViewer, e);
+                }
+            }),
+            true);
     }
 
     private ScrollViewer? VisibleScrollViewer()
@@ -1030,6 +1058,7 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(scrollViewer);
         Grid.SetRow(buttons, 1);
         panel.Children.Add(buttons);
+        AttachPopupScrollInput(panel, scrollViewer);
 
         var popup = OwnedPopupWindow.Create(
             this,
@@ -1097,6 +1126,7 @@ public sealed partial class MainWindow : Window
         buttons.Children.Add(copyButton);
         buttons.Children.Add(closeButton);
         panel.Children.Add(buttons);
+        AttachPopupScrollInput(panel, scrollViewer);
 
         var popup = OwnedPopupWindow.Create(
             this,
