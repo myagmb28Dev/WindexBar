@@ -24,7 +24,6 @@ AppUpdatesURL=https://github.com/myagmb28Dev/WindexBar/releases
 DefaultDirName={localappdata}\Programs\WindexBar
 DefaultGroupName=WindexBar
 DisableProgramGroupPage=yes
-UsePreviousAppDir=no
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -37,6 +36,7 @@ SolidCompression=yes
 WizardStyle=modern
 CloseApplications=yes
 CloseApplicationsFilter={#AppExeName}
+RestartApplications=no
 SetupLogging=yes
 
 [Tasks]
@@ -49,19 +49,24 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 [InstallDelete]
 Type: filesandordirs; Name: "{localappdata}\Programs\WindexBar"
 Type: filesandordirs; Name: "{userprograms}\WindexBar"
-Type: filesandordirs; Name: "{userstartup}\WindexBar.lnk"
-Type: filesandordirs; Name: "{userdesktop}\WindexBar.lnk"
 
 [Icons]
 Name: "{group}\WindexBar"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppExeName}"
-Name: "{userstartup}\WindexBar"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppExeName}"; Tasks: startup
-Name: "{userdesktop}\WindexBar"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppExeName}"; Tasks: desktopicon
+Name: "{userstartup}\WindexBar"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppExeName}"; Tasks: startup; Check: not IsAutoUpdate
+Name: "{userdesktop}\WindexBar"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppExeName}"; Tasks: desktopicon; Check: not IsAutoUpdate
 
 [Run]
-Filename: "{app}\{#AppExeName}"; Description: "Launch WindexBar"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExeName}"; Description: "Launch WindexBar"; Flags: nowait postinstall skipifsilent; Check: not IsAutoUpdate
+Filename: "{app}\{#AppExeName}"; Flags: nowait; Check: IsAutoUpdate
 
 [UninstallRun]
 Filename: "{cmd}"; Parameters: "/C taskkill /IM {#AppExeName} /F"; Flags: runhidden; RunOnceId: "StopWindexBar"
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
+
+[Code]
+function IsAutoUpdate: Boolean;
+begin
+  Result := CompareText(ExpandConstant('{param:autoupdate|0}'), '1') = 0;
+end;

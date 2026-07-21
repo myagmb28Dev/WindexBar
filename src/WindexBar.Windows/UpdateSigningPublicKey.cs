@@ -1,0 +1,7 @@
+namespace WindexBar.Windows;
+
+internal static class UpdateSigningPublicKey
+{
+    public const string ModulusBase64 = "7my4thjo+MePKVhLjWjlmb4xd/H0JXjcdnJ56qL3vC5GBNVw98vmnqKd7Q3andbQaMuS/uTp1ax94F8W/0aPj3cK50m7BbIHgLKLOtzJw5Hxp7A2qh4IQ36Y+s1Z42ccofnA+dCRGgYwI8bJqKPRTE9d7cQfawBLrlcUa/d2O9G8EGYdMWCwtFFrLmtxcMM3W0z/7CJ7jDr2C6HHtpMwP4rIwjJrrKMhZWd34O77wocCyFvTrM4x3LbtVdjb1p2ifc7mEx6O5rXMOff4c31BtCUKmpjYuPWSm58BA/ZnXl/qvgKam1PP/sH/2DnKbIhBpbZyvLSQDc/ybUUPyBUwElU1JDY0G9n62cFSvxcYTvCZ+ljwSLN5WjzEaKaUkpH6xzL5TUgdr2J0rZeORmzol2wSoHy9lTQ5gTIx+pML9RcEJmd3yAAG2EPjAUpf6L4/pMLIRF8S0WUM3woT3uCgPMt8EkWP78Kgn3OUlmZ52afi0KRnmI8vkGqYoVAo1SUR";
+    public const string ExponentBase64 = "AQAB";
+}

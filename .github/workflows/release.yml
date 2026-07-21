@@ -100,9 +100,12 @@ jobs:
         shell: cmd
         run: build-installer.cmd ${{ steps.release.outputs.version }}
 
-      - name: Collect installer metadata
+      - name: Create signed update manifest
         id: installer
         shell: pwsh
+        env:
+          WINDEXBAR_UPDATE_SIGNING_KEY: ${{ secrets.WINDEXBAR_UPDATE_SIGNING_KEY }}
+          WINDEXBAR_UPDATE_SIGNING_KEY_RECOVERY: ${{ secrets.WINDEXBAR_UPDATE_SIGNING_KEY_RECOVERY }}
         run: |
           $installer = Get-ChildItem -Path .\artifacts\installer -Filter WindexBarSetup.exe -Recurse |
             Sort-Object LastWriteTime -Descending |
@@ -113,21 +116,70 @@ jobs:
           }
 
           $hash = (Get-FileHash -Path $installer.FullName -Algorithm SHA256).Hash
-          $signature = Get-AuthenticodeSignature -FilePath $installer.FullName
+          $encodedKey = $env:WINDEXBAR_UPDATE_SIGNING_KEY
+          if ([string]::IsNullOrWhiteSpace($encodedKey)) {
+            $encodedKey = $env:WINDEXBAR_UPDATE_SIGNING_KEY_RECOVERY
+          }
+          if ([string]::IsNullOrWhiteSpace($encodedKey)) {
+            throw 'Neither WindexBar update signing key secret is configured.'
+          }
+
+          try {
+            $key = $encodedKey | ConvertFrom-Json
+            $parameters = [Security.Cryptography.RSAParameters]::new()
+            $parameters.Modulus = [Convert]::FromBase64String($key.Modulus)
+            $parameters.Exponent = [Convert]::FromBase64String($key.Exponent)
+            $parameters.D = [Convert]::FromBase64String($key.D)
+            $parameters.P = [Convert]::FromBase64String($key.P)
+            $parameters.Q = [Convert]::FromBase64String($key.Q)
+            $parameters.DP = [Convert]::FromBase64String($key.DP)
+            $parameters.DQ = [Convert]::FromBase64String($key.DQ)
+            $parameters.InverseQ = [Convert]::FromBase64String($key.InverseQ)
+          } catch {
+            throw "WINDEXBAR_UPDATE_SIGNING_KEY is invalid: $($_.Exception.Message)"
+          }
+
+          $manifestPath = Join-Path $installer.DirectoryName 'update.json'
+          $signaturePath = Join-Path $installer.DirectoryName 'update.sig'
+          $manifest = [ordered]@{
+            schemaVersion = 1
+            version = '${{ steps.release.outputs.version }}'
+            installer = 'WindexBarSetup.exe'
+            sha256 = $hash
+          } | ConvertTo-Json -Compress
+          $utf8 = [Text.UTF8Encoding]::new($false)
+          [IO.File]::WriteAllText($manifestPath, $manifest, $utf8)
+
+          $rsa = [Security.Cryptography.RSA]::Create()
+          try {
+            $rsa.ImportParameters($parameters)
+            $manifestBytes = $utf8.GetBytes($manifest)
+            $signatureBytes = $rsa.SignData(
+              $manifestBytes,
+              [Security.Cryptography.HashAlgorithmName]::SHA256,
+              [Security.Cryptography.RSASignaturePadding]::Pkcs1)
+            [IO.File]::WriteAllText($signaturePath, [Convert]::ToBase64String($signatureBytes), $utf8)
+          } finally {
+            $rsa.Dispose()
+          }
 
           "path=$($installer.FullName)" >> $env:GITHUB_OUTPUT
+          "manifest_path=$manifestPath" >> $env:GITHUB_OUTPUT
+          "signature_path=$signaturePath" >> $env:GITHUB_OUTPUT
           "sha256=$hash" >> $env:GITHUB_OUTPUT
-          "signature_status=$($signature.Status)" >> $env:GITHUB_OUTPUT
 
           Write-Host "Installer: $($installer.FullName)"
           Write-Host "SHA256: $hash"
-          Write-Host "Signature: $($signature.Status)"
+          Write-Host 'Signed update manifest created.'
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
           name: WindexBarSetup-${{ steps.release.outputs.version }}
-          path: ${{ steps.installer.outputs.path }}
+          path: |
+            ${{ steps.installer.outputs.path }}
+            ${{ steps.installer.outputs.manifest_path }}
+            ${{ steps.installer.outputs.signature_path }}
           if-no-files-found: error
 
       - name: Publish GitHub release
@@ -265,18 +317,23 @@ jobs:
           if ($releaseExists) {
             $assetNames = @(gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets --jq '.assets[].name')
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            if ($assetNames -contains 'WindexBarSetup.exe') {
-              throw "WindexBarSetup.exe already exists for $tag. Published release assets are immutable; create a new version instead."
+            if ($assetNames -contains 'WindexBarSetup.exe' -or $assetNames -contains 'update.json' -or $assetNames -contains 'update.sig') {
+              throw "WindexBar update assets already exist for $tag. Published release assets are immutable; create a new version instead."
             }
 
-            gh release edit $tag --repo $env:GITHUB_REPOSITORY --title "WindexBar $version" --notes-file "$notesPath" --draft=false
+            gh release edit $tag --repo $env:GITHUB_REPOSITORY --title "WindexBar $version" --notes-file "$notesPath" --draft=true
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           } else {
-            gh release create $tag --repo $env:GITHUB_REPOSITORY --verify-tag --title "WindexBar $version" --notes-file "$notesPath"
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --verify-tag --title "WindexBar $version" --notes-file "$notesPath" --draft
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
-          gh release upload $tag "$installer#WindexBarSetup.exe" --repo $env:GITHUB_REPOSITORY
+          $manifest = '${{ steps.installer.outputs.manifest_path }}'
+          $signature = '${{ steps.installer.outputs.signature_path }}'
+          gh release upload $tag "$installer#WindexBarSetup.exe" "$manifest#update.json" "$signature#update.sig" --repo $env:GITHUB_REPOSITORY
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          gh release edit $tag --repo $env:GITHUB_REPOSITORY --draft=false
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   submit-winget:
@@ -291,11 +348,39 @@ jobs:
         id: winget
         shell: pwsh
         run: |
+          function Get-OpenWindexBarWingetPullRequest {
+            $query = [Uri]::EscapeDataString('repo:microsoft/winget-pkgs is:pr is:open in:title "myagmb28Dev.WindexBar"')
+            $headers = @{
+              Accept = 'application/vnd.github+json'
+              Authorization = "Bearer $env:WINGET_CREATE_GITHUB_TOKEN"
+              'User-Agent' = 'WindexBar-release-workflow'
+              'X-GitHub-Api-Version' = '2022-11-28'
+            }
+
+            try {
+              $result = Invoke-RestMethod -Uri "https://api.github.com/search/issues?q=$query&per_page=1" -Headers $headers
+              return @($result.items) | Select-Object -First 1
+            } catch {
+              Write-Warning "Could not check for an existing WinGet PR. Submission will still be attempted. $($_.Exception.Message)"
+              return $null
+            }
+          }
+
           if ([string]::IsNullOrWhiteSpace($env:WINGET_CREATE_GITHUB_TOKEN)) {
             Write-Warning 'WINGET_TOKEN is not configured. Skipping the WinGet update submission.'
             'enabled=false' >> $env:GITHUB_OUTPUT
             '### WinGet submission skipped' >> $env:GITHUB_STEP_SUMMARY
             'Add the `WINGET_TOKEN` repository secret before the next release to enable automatic update PRs.' >> $env:GITHUB_STEP_SUMMARY
+            return
+          }
+
+          $openPullRequest = Get-OpenWindexBarWingetPullRequest
+          if ($openPullRequest) {
+            Write-Host "An open WindexBar WinGet PR is still awaiting review: $($openPullRequest.html_url)"
+            'enabled=false' >> $env:GITHUB_OUTPUT
+            '### WinGet submission deferred' >> $env:GITHUB_STEP_SUMMARY
+            "An existing WindexBar WinGet PR is still open: $($openPullRequest.html_url)" >> $env:GITHUB_STEP_SUMMARY
+            'The release remains successful and a later release will retry after that PR is resolved.' >> $env:GITHUB_STEP_SUMMARY
             return
           }
 
@@ -315,6 +400,24 @@ jobs:
           RELEASE_VERSION: ${{ needs.release.outputs.version }}
           RELEASE_TAG: ${{ needs.release.outputs.tag }}
         run: |
+          function Get-OpenWindexBarWingetPullRequest {
+            $query = [Uri]::EscapeDataString('repo:microsoft/winget-pkgs is:pr is:open in:title "myagmb28Dev.WindexBar"')
+            $headers = @{
+              Accept = 'application/vnd.github+json'
+              Authorization = "Bearer $env:WINGET_CREATE_GITHUB_TOKEN"
+              'User-Agent' = 'WindexBar-release-workflow'
+              'X-GitHub-Api-Version' = '2022-11-28'
+            }
+
+            try {
+              $result = Invoke-RestMethod -Uri "https://api.github.com/search/issues?q=$query&per_page=1" -Headers $headers
+              return @($result.items) | Select-Object -First 1
+            } catch {
+              Write-Warning "Could not recheck for an existing WinGet PR. $($_.Exception.Message)"
+              return $null
+            }
+          }
+
           $toolPath = Join-Path $env:RUNNER_TEMP 'wingetcreate.exe'
           $installerUrl = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:RELEASE_TAG/WindexBarSetup.exe"
           $releaseNotesUrl = "https://github.com/$env:GITHUB_REPOSITORY/releases/tag/$env:RELEASE_TAG"
@@ -332,4 +435,16 @@ jobs:
           )
 
           & $toolPath @arguments
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $submitExitCode = $LASTEXITCODE
+          if ($submitExitCode -ne 0) {
+            $openPullRequest = Get-OpenWindexBarWingetPullRequest
+            if ($openPullRequest) {
+              Write-Warning "WinGetCreate returned $submitExitCode, but a WindexBar PR is open and awaiting review: $($openPullRequest.html_url)"
+              '### WinGet submission deferred' >> $env:GITHUB_STEP_SUMMARY
+              "An existing WindexBar WinGet PR is still open: $($openPullRequest.html_url)" >> $env:GITHUB_STEP_SUMMARY
+              'The release remains successful and a later release will retry after that PR is resolved.' >> $env:GITHUB_STEP_SUMMARY
+              exit 0
+            }
+
+            exit $submitExitCode
+          }

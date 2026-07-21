@@ -717,6 +717,26 @@ public sealed class ConfigTests
     }
 
     [Fact]
+    public void PreservesAppUpdateState()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
+        var store = new WindexBarConfigStore(path);
+        var config = store.LoadOrCreateDefault();
+        var checkedAt = new DateTimeOffset(2026, 7, 21, 1, 2, 3, TimeSpan.Zero);
+        config.AppUpdates.LatestVersion = "1.6.0";
+        config.AppUpdates.LastCheckedAt = checkedAt;
+        config.AppUpdates.PendingVersion = "1.6.0";
+        store.Save(config);
+
+        var reloaded = store.LoadOrCreateDefault();
+
+        Assert.True(reloaded.AppUpdates.AutomaticallyUpdate);
+        Assert.Equal("1.6.0", reloaded.AppUpdates.LatestVersion);
+        Assert.Equal(checkedAt, reloaded.AppUpdates.LastCheckedAt);
+        Assert.Equal("1.6.0", reloaded.AppUpdates.PendingVersion);
+    }
+
+    [Fact]
     public void PreservesSavedLanguage()
     {
         var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
@@ -2148,6 +2168,67 @@ public sealed class TrayIconServiceTests
 
 public sealed class ReleaseWorkflowTests
 {
+    [Fact]
+    public void ReleaseWorkflowPublishesRsaSignedUpdateManifest()
+    {
+        var workflow = File.ReadAllText(FindRepositoryFile(Path.Combine(".github", "workflows", "release.yml")));
+
+        Assert.Contains("WINDEXBAR_UPDATE_SIGNING_KEY", workflow, StringComparison.Ordinal);
+        Assert.Contains("WINDEXBAR_UPDATE_SIGNING_KEY_RECOVERY", workflow, StringComparison.Ordinal);
+        Assert.Contains("RSASignaturePadding]::Pkcs1", workflow, StringComparison.Ordinal);
+        Assert.Contains("update.json", workflow, StringComparison.Ordinal);
+        Assert.Contains("update.sig", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("signature.Status -ne 'Valid'", workflow, StringComparison.Ordinal);
+        Assert.Matches(
+            new Regex("gh release upload.*gh release edit.*--draft=false", RegexOptions.Singleline),
+            workflow);
+    }
+
+    [Fact]
+    public void ReleaseWorkflowDefersWingetSubmissionWhilePullRequestIsOpen()
+    {
+        var workflow = File.ReadAllText(FindRepositoryFile(Path.Combine(".github", "workflows", "release.yml")));
+
+        Assert.Contains("Get-OpenWindexBarWingetPullRequest", workflow, StringComparison.Ordinal);
+        Assert.Contains("repo:microsoft/winget-pkgs is:pr is:open", workflow, StringComparison.Ordinal);
+        Assert.Contains("WinGet submission deferred", workflow, StringComparison.Ordinal);
+        Assert.Contains("exit 0", workflow, StringComparison.Ordinal);
+        Assert.Contains("exit $submitExitCode", workflow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AppContainsGenerated3072BitUpdatePublicKey()
+    {
+        var source = File.ReadAllText(FindRepositoryFile(Path.Combine(
+            "src",
+            "WindexBar.Windows",
+            "UpdateSigningPublicKey.cs")));
+        var modulus = Regex.Match(source, "ModulusBase64 = \"([^\"]+)\"");
+        var exponent = Regex.Match(source, "ExponentBase64 = \"([^\"]+)\"");
+
+        Assert.True(modulus.Success);
+        Assert.True(exponent.Success);
+        Assert.Equal(384, Convert.FromBase64String(modulus.Groups[1].Value).Length);
+        Assert.Equal("AQAB", exponent.Groups[1].Value);
+        Assert.DoesNotContain("__WINDEXBAR", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void InstallerPreservesUpgradeChoicesAndOnlyAutoRestartsForAutoUpdate()
+    {
+        var installer = File.ReadAllText(FindRepositoryFile(Path.Combine("installer", "WindexBar.iss")));
+
+        Assert.DoesNotContain("UsePreviousAppDir=no", installer, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "Type: filesandordirs; Name: \"{userstartup}\\WindexBar.lnk\"",
+            installer,
+            StringComparison.Ordinal);
+        Assert.Contains("{param:autoupdate|0}", installer, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Check: IsAutoUpdate", installer, StringComparison.Ordinal);
+        Assert.Contains("Tasks: startup; Check: not IsAutoUpdate", installer, StringComparison.Ordinal);
+        Assert.Contains("Tasks: desktopicon; Check: not IsAutoUpdate", installer, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void ReleaseVersionPatternAllowsMinorTags()
     {
