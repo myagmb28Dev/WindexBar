@@ -135,7 +135,7 @@ public sealed partial class MainWindow : Window
         ApplyLanguage();
         ConfigureCompactWindow();
         AppWindow.Changed += OnAppWindowChanged;
-        RootLayout.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(OnModelNavigationKeyDown), true);
+        RootLayout.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(OnScrollNavigationKeyDown), true);
         RootLayout.PointerPressed += (_, _) =>
         {
             RootLayout.Focus(FocusState.Pointer);
@@ -782,9 +782,12 @@ public sealed partial class MainWindow : Window
         });
     }
 
-    private void OnModelNavigationKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
+    private void OnScrollNavigationKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
     {
-        if (HudView.Visibility != Visibility.Visible)
+        var scrollViewer = VisibleScrollViewer();
+        if (scrollViewer is null
+            || scrollViewer.ScrollableHeight <= 0
+            || IsArrowKeyInputControl(e.OriginalSource as DependencyObject))
         {
             return;
         }
@@ -792,38 +795,84 @@ public sealed partial class MainWindow : Window
         switch (e.Key)
         {
             case VirtualKey.Down:
-                ScrollHudBy(KeyboardScrollStep);
+                ScrollBy(scrollViewer, KeyboardScrollStep);
                 e.Handled = true;
                 break;
             case VirtualKey.Up:
-                ScrollHudBy(-KeyboardScrollStep);
+                ScrollBy(scrollViewer, -KeyboardScrollStep);
                 e.Handled = true;
                 break;
             case VirtualKey.PageDown:
-                ScrollHudBy(HudView.ScrollViewer.ViewportHeight);
+                ScrollBy(scrollViewer, scrollViewer.ViewportHeight);
                 e.Handled = true;
                 break;
             case VirtualKey.PageUp:
-                ScrollHudBy(-HudView.ScrollViewer.ViewportHeight);
+                ScrollBy(scrollViewer, -scrollViewer.ViewportHeight);
                 e.Handled = true;
                 break;
             case VirtualKey.Home:
-                ScrollHudTo(0);
+                ScrollTo(scrollViewer, 0);
                 e.Handled = true;
                 break;
             case VirtualKey.End:
-                ScrollHudTo(HudView.ScrollViewer.ScrollableHeight);
+                ScrollTo(scrollViewer, scrollViewer.ScrollableHeight);
                 e.Handled = true;
                 break;
         }
     }
 
-    private void ScrollHudBy(double delta) => ScrollHudTo(HudView.ScrollViewer.VerticalOffset + delta);
-
-    private void ScrollHudTo(double verticalOffset)
+    private ScrollViewer? VisibleScrollViewer()
     {
-        var targetOffset = Math.Clamp(verticalOffset, 0, Math.Max(0, HudView.ScrollViewer.ScrollableHeight));
-        HudView.ScrollViewer.ChangeView(null, targetOffset, null, disableAnimation: false);
+        if (HudView.Visibility == Visibility.Visible)
+        {
+            return HudView.ScrollViewer;
+        }
+
+        if (SessionsView.Visibility == Visibility.Visible)
+        {
+            return SessionsView.ScrollViewer;
+        }
+
+        if (CreditsView.Visibility == Visibility.Visible)
+        {
+            return CreditsView.ScrollViewer;
+        }
+
+        if (SettingsView.Visibility == Visibility.Visible)
+        {
+            return SettingsView.ScrollViewer;
+        }
+
+        if (StyleView.Visibility == Visibility.Visible)
+        {
+            return StyleView.ScrollViewer;
+        }
+
+        return ResetCreditDetailsView.Visibility == Visibility.Visible
+            ? ResetCreditDetailsView.ScrollViewer
+            : null;
+    }
+
+    private static bool IsArrowKeyInputControl(DependencyObject? source)
+    {
+        for (var current = source; current is not null; current = VisualTreeHelper.GetParent(current))
+        {
+            if (current is TextBox or PasswordBox or RichEditBox or ComboBox or Slider or NumberBox)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void ScrollBy(ScrollViewer scrollViewer, double delta) =>
+        ScrollTo(scrollViewer, scrollViewer.VerticalOffset + delta);
+
+    private static void ScrollTo(ScrollViewer scrollViewer, double verticalOffset)
+    {
+        var targetOffset = Math.Clamp(verticalOffset, 0, Math.Max(0, scrollViewer.ScrollableHeight));
+        scrollViewer.ChangeView(null, targetOffset, null, disableAnimation: false);
     }
 
     private void MinimizeCircleButton_Click(object sender, RoutedEventArgs args)
