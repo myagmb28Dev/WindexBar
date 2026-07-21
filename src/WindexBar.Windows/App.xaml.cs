@@ -17,6 +17,7 @@ public partial class App : WinApplication
     private HttpClient? _httpClient;
     private HttpClient? _appUpdateHttpClient;
     private CancellationTokenSource? _appUpdateCancellation;
+    private string? _deferredAppUpdateVersion;
     private bool _shuttingDown;
 
     public App()
@@ -150,6 +151,11 @@ public partial class App : WinApplication
     {
         try
         {
+            if (_deferredAppUpdateVersion is not null)
+            {
+                return;
+            }
+
             if (!AppVersion.TryParse(AppReleaseVersion.Value, out var currentVersion))
             {
                 LogMessage($"Automatic update skipped because version '{AppReleaseVersion.Value}' is invalid.");
@@ -169,6 +175,14 @@ public partial class App : WinApplication
                 return;
             }
 
+            var installNow = await TrayIconService.PromptForAppUpdateAsync(update.Version, cancellationToken);
+            if (!installNow || cancellationToken.IsCancellationRequested)
+            {
+                _deferredAppUpdateVersion = update.Version.ToString();
+                LogMessage($"Automatic update to {update.Version} deferred by the user.");
+                return;
+            }
+
             SettingsStore.Update(config =>
             {
                 config.AppUpdates.PendingVersion = update.Version.ToString();
@@ -178,7 +192,7 @@ public partial class App : WinApplication
             var process = Process.Start(new ProcessStartInfo
             {
                 FileName = update.InstallerPath,
-                Arguments = "/VERYSILENT /NORESTART /CLOSEAPPLICATIONS /AUTOUPDATE=1",
+                Arguments = "/VERYSILENT /NORESTART /CLOSEAPPLICATIONS /FORCECLOSEAPPLICATIONS /AUTOUPDATE=1",
                 UseShellExecute = true,
                 WorkingDirectory = Path.GetDirectoryName(update.InstallerPath)!
             });

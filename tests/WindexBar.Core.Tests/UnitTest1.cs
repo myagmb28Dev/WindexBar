@@ -2230,6 +2230,27 @@ public sealed class ReleaseWorkflowTests
     }
 
     [Fact]
+    public void AppUpdateRequiresConfirmationAndForceClosesOnlyAfterApproval()
+    {
+        var app = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "App.xaml.cs")));
+        var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "MainWindow.xaml.cs")));
+
+        var promptIndex = app.IndexOf("PromptForAppUpdateAsync", StringComparison.Ordinal);
+        var installerIndex = app.IndexOf("Process.Start(new ProcessStartInfo", StringComparison.Ordinal);
+        Assert.True(promptIndex >= 0);
+        Assert.True(installerIndex > promptIndex);
+        Assert.Contains("if (!installNow", app, StringComparison.Ordinal);
+        Assert.Contains("_deferredAppUpdateVersion", app, StringComparison.Ordinal);
+        Assert.Contains("/FORCECLOSEAPPLICATIONS", app, StringComparison.Ordinal);
+        Assert.Contains("Update now", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("Later", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("HasOpenAppUpdatePrompt", mainWindow, StringComparison.Ordinal);
+
+        var trayService = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "TrayIconService.cs")));
+        Assert.Contains("_statusWindow?.HasOpenAppUpdatePrompt == true", trayService, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ReleaseVersionPatternAllowsMinorTags()
     {
         var workflow = File.ReadAllText(FindRepositoryFile(Path.Combine(".github", "workflows", "release.yml")));
