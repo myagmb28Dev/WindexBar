@@ -61,6 +61,37 @@ public sealed class PresentationModelTests
         Assert.Contains("세션 합계", projectFirst.Projects[0].Sessions[0].TokenDetails);
     }
 
+    [Theory]
+    [InlineData("en", "No project")]
+    [InlineData("ko", "\uD504\uB85C\uC81D\uD2B8 \uC5C6\uC74C")]
+    public void SessionModelLocalizesDefaultSessionDisplayNameWithoutChangingItsKey(
+        string language,
+        string expectedName)
+    {
+        var now = DateTimeOffset.UnixEpoch;
+        var usage = new TokenUsageSnapshot(
+            new TokenUsageBreakdown(80, 0, 20, 0, 100),
+            null,
+            200,
+            now);
+        var sessions = new[]
+        {
+            new CodexSessionUsageSnapshot(
+                "default-session",
+                "Conversation",
+                @"C:\Users\Tester\Documents\Codex\2026-07-21\default-session",
+                usage,
+                now)
+        };
+
+        var model = SessionListViewModelFactory.Create(sessions, true, language);
+
+        var project = Assert.Single(model.Projects);
+        Assert.Equal("default-session", project.Key);
+        Assert.Equal(expectedName, project.ProjectName);
+        Assert.True(project.IsNonProject);
+    }
+
     [Fact]
     public void HudModelKeepsCodexHeaderWhenNoRateLimitWindowCanBeShown()
     {
