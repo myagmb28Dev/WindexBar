@@ -20,7 +20,10 @@ public sealed class WeeklyLimitImpactTrackerTests
         Assert.Equal(3, session.WeeklyLimitImpactPercent);
 
         var view = SessionListViewModelFactory.Create(result.Sessions, true, "ko");
-        Assert.Contains("\uC8FC\uAC04 \uD55C\uB3C4 \uC601\uD5A5: -3%", view.Projects[0].Sessions[0].TokenDetails);
+        var card = view.Projects[0].Sessions[0];
+        Assert.Contains("\uC8FC\uAC04 \uD55C\uB3C4 \uC601\uD5A5: -3%", card.TokenDetails);
+        Assert.DoesNotContain("\uC138\uC158 \uD569\uACC4", card.TokenDetails);
+        Assert.Contains("\uC138\uC158 \uD569\uACC4", card.DetailedTokenDetails);
     }
 
     [Fact]
