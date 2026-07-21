@@ -24,7 +24,7 @@ public sealed class AppUpdateServiceTests
         var source = new FakeReleaseSource(Release("1.6.0"));
         using var client = new HttpClient(new StaticHandler(new Dictionary<string, byte[]>()));
         var service = new AppUpdateService(client, source, new FakeVerifier(true), () => now);
-        var config = new AppUpdateConfig { LastCheckedAt = now.AddHours(-1) };
+        var config = new AppUpdateConfig { LastCheckedAt = now.AddMinutes(-1) };
 
         var result = await service.CheckAndStageAsync(
             config,
@@ -35,6 +35,33 @@ public sealed class AppUpdateServiceTests
 
         Assert.Null(result);
         Assert.Equal(0, source.Calls);
+    }
+
+    [Fact]
+    public void ChecksForAReleaseEveryFifteenMinutesWhileRunning()
+    {
+        Assert.Equal(TimeSpan.FromMinutes(15), AppUpdateService.CheckInterval);
+    }
+
+    [Fact]
+    public async Task ForcedLaunchCheckIgnoresFreshTimestamp()
+    {
+        var now = new DateTimeOffset(2026, 7, 21, 0, 0, 0, TimeSpan.Zero);
+        var source = new FakeReleaseSource(Release("1.5.5"));
+        using var client = new HttpClient(new StaticHandler(new Dictionary<string, byte[]>()));
+        var service = new AppUpdateService(client, source, new FakeVerifier(true), () => now);
+        var config = new AppUpdateConfig { LastCheckedAt = now.AddMinutes(-1) };
+
+        var result = await service.CheckAndStageAsync(
+            config,
+            new AppVersion(1, 5, 5),
+            TemporaryDirectory(),
+            true,
+            CancellationToken.None);
+
+        Assert.Null(result);
+        Assert.Equal(1, source.Calls);
+        Assert.Equal(now, config.LastCheckedAt);
     }
 
     [Fact]

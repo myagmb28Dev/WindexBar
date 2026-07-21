@@ -78,7 +78,7 @@ public partial class App : WinApplication
         _initialized = true;
         HandlePreviousAppUpdate();
         _appUpdateCancellation = new CancellationTokenSource();
-        _ = CheckForAppUpdateAsync(_appUpdateCancellation.Token);
+        _ = RunAppUpdateChecksAsync(_appUpdateCancellation.Token);
     }
 
     public void Shutdown()
@@ -128,11 +128,28 @@ public partial class App : WinApplication
         TrayIconService.ShowError("WindexBar update failed", message);
     }
 
-    private async Task CheckForAppUpdateAsync(CancellationToken cancellationToken)
+    private async Task RunAppUpdateChecksAsync(CancellationToken cancellationToken)
     {
         try
         {
             await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            var force = true;
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                await CheckForAppUpdateAsync(force, cancellationToken);
+                force = false;
+                await Task.Delay(AppUpdateService.CheckInterval, cancellationToken);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+    }
+
+    private async Task CheckForAppUpdateAsync(bool force, CancellationToken cancellationToken)
+    {
+        try
+        {
             if (!AppVersion.TryParse(AppReleaseVersion.Value, out var currentVersion))
             {
                 LogMessage($"Automatic update skipped because version '{AppReleaseVersion.Value}' is invalid.");
@@ -144,7 +161,7 @@ public partial class App : WinApplication
                 SettingsStore.Config.AppUpdates,
                 currentVersion,
                 stagingRoot,
-                force: false,
+                force,
                 cancellationToken);
             SettingsStore.Save();
             if (update is null || cancellationToken.IsCancellationRequested)
