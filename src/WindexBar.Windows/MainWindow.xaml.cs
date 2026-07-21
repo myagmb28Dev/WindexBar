@@ -87,6 +87,7 @@ public sealed partial class MainWindow : Window
     private Window? _resetCreditDetailsWindow;
     private Window? _shortcutWindow;
     private Window? _codexUpdateDetailsWindow;
+    private Window? _appUpdatePromptWindow;
     private object? _codexUpdateOriginalInstallMethod;
     private string _codexUpdateOriginalCustomCommand = string.Empty;
     private bool _codexUpdateDetailsApplied;
@@ -176,6 +177,8 @@ public sealed partial class MainWindow : Window
 
         UpdateState();
     }
+
+    internal bool HasOpenAppUpdatePrompt => _appUpdatePromptWindow is not null;
 
     private void BuildLayout()
     {
@@ -976,6 +979,10 @@ public sealed partial class MainWindow : Window
 
     private void CloseAuxiliaryWindows()
     {
+        var appUpdatePrompt = _appUpdatePromptWindow;
+        _appUpdatePromptWindow = null;
+        appUpdatePrompt?.Close();
+
         var sessionDetails = _sessionDetailsWindow;
         _sessionDetailsWindow = null;
         sessionDetails?.Close();
@@ -995,6 +1002,78 @@ public sealed partial class MainWindow : Window
             OwnedPopupWindow.DetachContent(updateDetails);
             updateDetails.Close();
         }
+    }
+
+    internal Task<bool> PromptForAppUpdateAsync(AppVersion version, CancellationToken cancellationToken)
+    {
+        _appUpdatePromptWindow?.Close();
+
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var panel = new StackPanel { Spacing = 12 };
+        panel.Children.Add(new TextBlock
+        {
+            Text = Text(
+                $"WindexBar {version} is ready to install.",
+                $"WindexBar {version} \uC5C5\uB370\uC774\uD2B8\uB97C \uC124\uCE58\uD560 \uC218 \uC788\uC5B4\uC694."),
+            FontSize = 16,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap
+        });
+        panel.Children.Add(new TextBlock
+        {
+            Text = Text(
+                "WindexBar will close, install the update, and restart. Your settings will be preserved.",
+                "\uC9C0\uAE08 \uC5C5\uB370\uC774\uD2B8\uD558\uBA74 WindexBar\uAC00 \uC885\uB8CC\uB41C \uB4A4 \uC124\uCE58\uB418\uACE0 \uB2E4\uC2DC \uC2DC\uC791\uB3FC\uC694. \uC124\uC815\uC740 \uADF8\uB300\uB85C \uC720\uC9C0\uB3FC\uC694."),
+            TextWrapping = TextWrapping.Wrap,
+            Opacity = 0.75,
+            FontSize = 12
+        });
+
+        var updateButton = FeatureViewHelpers.CreateCompactButton(Text("Update now", "\uC9C0\uAE08 \uC5C5\uB370\uC774\uD2B8"));
+        var laterButton = FeatureViewHelpers.CreateCompactButton(Text("Later", "\uB098\uC911\uC5D0"));
+        var buttons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Spacing = 6
+        };
+        buttons.Children.Add(updateButton);
+        buttons.Children.Add(laterButton);
+        panel.Children.Add(buttons);
+
+        var popup = OwnedPopupWindow.Create(
+            this,
+            Text("WindexBar update available", "WindexBar \uC5C5\uB370\uC774\uD2B8"),
+            panel,
+            PopupScale,
+            logicalWidth: 330,
+            logicalHeight: 205);
+        _appUpdatePromptWindow = popup;
+
+        updateButton.Click += (_, _) =>
+        {
+            completion.TrySetResult(true);
+            popup.Close();
+        };
+        laterButton.Click += (_, _) => popup.Close();
+        popup.Closed += (_, _) =>
+        {
+            completion.TrySetResult(false);
+            if (ReferenceEquals(_appUpdatePromptWindow, popup))
+            {
+                _appUpdatePromptWindow = null;
+            }
+        };
+
+        var cancellationRegistration = cancellationToken.Register(() =>
+            _dispatcher.TryEnqueue(() => popup.Close()));
+        _ = completion.Task.ContinueWith(
+            _ => cancellationRegistration.Dispose(),
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+        popup.Activate();
+        return completion.Task;
     }
 
     private void ShowSessionDetailsWindow(SessionDetailsRequestedEventArgs args)

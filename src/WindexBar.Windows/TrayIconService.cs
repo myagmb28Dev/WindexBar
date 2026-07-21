@@ -102,6 +102,37 @@ public sealed class TrayIconService : IDisposable
         _notifyIcon.ShowBalloonTip(10000, title, message, Forms.ToolTipIcon.Error);
     }
 
+    public async Task<bool> PromptForAppUpdateAsync(AppVersion version, CancellationToken cancellationToken)
+    {
+        if (_disposed || cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+
+        if (_dispatcher.HasThreadAccess)
+        {
+            return await PromptForAppUpdateOnUiThreadAsync(version, cancellationToken);
+        }
+
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!_dispatcher.TryEnqueue(async () =>
+            {
+                try
+                {
+                    completion.TrySetResult(await PromptForAppUpdateOnUiThreadAsync(version, cancellationToken));
+                }
+                catch (Exception error)
+                {
+                    completion.TrySetException(error);
+                }
+            }))
+        {
+            return false;
+        }
+
+        return await completion.Task.WaitAsync(cancellationToken);
+    }
+
     public void ToggleStatusWindow()
     {
         if (_disposed)
@@ -171,6 +202,14 @@ public sealed class TrayIconService : IDisposable
         }
 
         return _statusWindow;
+    }
+
+    private Task<bool> PromptForAppUpdateOnUiThreadAsync(AppVersion version, CancellationToken cancellationToken)
+    {
+        var window = GetOrCreateStatusWindow();
+        window.ShowHudView();
+        WindowCloseBehavior.Show(window);
+        return window.PromptForAppUpdateAsync(version, cancellationToken);
     }
 
     private Forms.ContextMenuStrip BuildMenu()
@@ -299,6 +338,11 @@ public sealed class TrayIconService : IDisposable
     private void ApplyAutoVisibility(bool isCodexActivity)
     {
         if (_disposed || !_settingsStore.Config.AutoShowWithCodex)
+        {
+            return;
+        }
+
+        if (_statusWindow?.HasOpenAppUpdatePrompt == true)
         {
             return;
         }
