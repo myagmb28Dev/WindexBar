@@ -112,7 +112,7 @@ public static class SessionListViewModelFactory
 
         if (IsDefaultSessionPath(projectPath))
         {
-            return "default-session";
+            return Text(language, "No project", "\uD504\uB85C\uC81D\uD2B8 \uC5C6\uC74C");
         }
 
         var normalized = NormalizeProjectPath(projectPath);
