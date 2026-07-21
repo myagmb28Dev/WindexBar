@@ -48,31 +48,75 @@ function ConvertTo-CommandLine {
     [string]::Join(' ', $quoted)
 }
 
+function Get-ProgressBarWidth {
+    $width = 30
+    try {
+        $consoleWidth = $Host.UI.RawUI.WindowSize.Width
+        $width = [Math]::Max(18, [Math]::Min(34, $consoleWidth - 48))
+    }
+    catch {
+    }
+
+    $width
+}
+
+function Write-InstallerBanner {
+    Write-Host '[ WDX ' -ForegroundColor Yellow -NoNewline
+    Write-Host '//' -ForegroundColor Magenta -NoNewline
+    Write-Host ' INSTALL PROTOCOL ]' -ForegroundColor Cyan
+    Write-Host '  LOCAL DEPLOYMENT LINK ' -ForegroundColor DarkGray -NoNewline
+    Write-Host '::' -ForegroundColor Magenta -NoNewline
+    Write-Host ' WIN-X64' -ForegroundColor Yellow
+    Write-Host ''
+}
+
 function Write-Bar {
     param(
         [int]$Percent,
         [string]$Label
     )
 
-    $width = 32
+    $width = Get-ProgressBarWidth
     $safePercent = [Math]::Max(0, [Math]::Min(100, $Percent))
     $filled = [int][Math]::Round($width * ($safePercent / 100))
     $filledChar = [char]0x2588
-    $emptyChar = [char]0x2591
-    $palette = @('DarkMagenta', 'Magenta', 'Blue', 'Cyan')
+    $emptyChar = [char]0x00B7
+    $segmentChar = [char]0x2502
 
-    Write-Host "`r[" -NoNewline
+    Write-Host "`r" -NoNewline
+    Write-Host 'WDX' -ForegroundColor Yellow -NoNewline
+    Write-Host '//' -ForegroundColor Magenta -NoNewline
+    Write-Host 'SYNC ' -ForegroundColor Cyan -NoNewline
+    Write-Host '[' -ForegroundColor DarkYellow -NoNewline
     for ($i = 0; $i -lt $width; $i++) {
         if ($i -lt $filled) {
-            $colorIndex = [Math]::Min($palette.Count - 1, [int][Math]::Floor(($i / [Math]::Max(1, $width - 1)) * $palette.Count))
-            Write-Host $filledChar -ForegroundColor $palette[$colorIndex] -NoNewline
+            $cellColor = if ($i -eq ($filled - 1) -and $safePercent -lt 100) {
+                'Cyan'
+            }
+            elseif (($i % 8) -eq 0) {
+                'Magenta'
+            }
+            elseif (($i % 2) -eq 0) {
+                'Yellow'
+            }
+            else {
+                'DarkYellow'
+            }
+            Write-Host $filledChar -ForegroundColor $cellColor -NoNewline
+        }
+        elseif (($i % 8) -eq 0) {
+            Write-Host $segmentChar -ForegroundColor DarkCyan -NoNewline
         }
         else {
             Write-Host $emptyChar -ForegroundColor DarkGray -NoNewline
         }
     }
 
-    Write-Host ("] {0,3}%  {1}    " -f $safePercent, $Label) -NoNewline
+    Write-Host '] ' -ForegroundColor DarkYellow -NoNewline
+    Write-Host ('{0,3}%' -f $safePercent) -ForegroundColor Yellow -NoNewline
+    Write-Host ' :: ' -ForegroundColor Magenta -NoNewline
+    Write-Host ('{0,-24}' -f $Label.ToUpperInvariant()) -ForegroundColor White -NoNewline
+    Write-Host '    ' -NoNewline
 }
 
 function Complete-Bar {
@@ -80,6 +124,10 @@ function Complete-Bar {
 
     Write-Bar 100 $Label
     Write-Host ''
+    Write-Host '>> ' -ForegroundColor Magenta -NoNewline
+    Write-Host 'INSTALL COMPLETE ' -ForegroundColor Yellow -NoNewline
+    Write-Host '//' -ForegroundColor DarkCyan -NoNewline
+    Write-Host ' SYSTEM READY' -ForegroundColor Cyan
 }
 
 function Invoke-WithProgress {
@@ -296,8 +344,7 @@ function Register-UninstallEntry {
 
 try {
     Write-Host ''
-    Write-Host 'WindexBar console installer'
-    Write-Host ''
+    Write-InstallerBanner
 
     if (-not (Test-Path -LiteralPath $ArtifactsRoot)) {
         [void](New-Item -ItemType Directory -Force -Path $ArtifactsRoot)

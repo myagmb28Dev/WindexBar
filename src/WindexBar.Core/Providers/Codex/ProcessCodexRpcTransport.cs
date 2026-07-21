@@ -1,9 +1,12 @@
 using System.Diagnostics;
+using System.Text;
 
 namespace WindexBar.Core.Providers.Codex;
 
 public sealed class ProcessCodexRpcTransportFactory : ICodexRpcTransportFactory
 {
+    private static readonly Encoding Utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
     public ICodexRpcTransport Start(string executablePath, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> environment)
     {
         var startInfo = new ProcessStartInfo
@@ -13,6 +16,9 @@ public sealed class ProcessCodexRpcTransportFactory : ICodexRpcTransportFactory
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            StandardInputEncoding = Utf8NoBom,
+            StandardOutputEncoding = Utf8NoBom,
+            StandardErrorEncoding = Utf8NoBom,
             CreateNoWindow = true
         };
 

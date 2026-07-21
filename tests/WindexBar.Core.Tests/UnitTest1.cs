@@ -1961,12 +1961,12 @@ public sealed class InstallerBuildScriptTests
     [Fact]
     public void WindowsAppWiresAutoShowWithCodexSettingAndActivityService()
     {
-        var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "MainWindow.xaml.cs")));
+        var settingsController = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "Controllers", "SettingsController.cs")));
         var trayService = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "TrayIconService.cs")));
         var activityService = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "ForegroundCodexActivityService.cs")));
 
-        Assert.Contains("AutoShowWithCodexCheckBox", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("config.AutoShowWithCodex = AutoShowWithCodexCheckBox.IsChecked == true", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("AutoShowWithCodexCheckBox", settingsController, StringComparison.Ordinal);
+        Assert.Contains("config.AutoShowWithCodex = _view.AutoShowWithCodexCheckBox.IsChecked == true", settingsController, StringComparison.Ordinal);
         Assert.Contains("ForegroundCodexActivityService", trayService, StringComparison.Ordinal);
         Assert.Contains("ActivitySampled", trayService, StringComparison.Ordinal);
         Assert.Contains("AutoVisibilityStabilityFilter", trayService, StringComparison.Ordinal);
@@ -1980,12 +1980,12 @@ public sealed class InstallerBuildScriptTests
     [Fact]
     public void AutoShowModeDisablesWindowToggleShortcut()
     {
-        var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "MainWindow.xaml.cs")));
+        var settingsController = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "Controllers", "SettingsController.cs")));
         var trayService = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "TrayIconService.cs")));
 
-        Assert.Contains("ApplyAutoShowShortcutState();", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("ToggleHotkeyTextBox.IsEnabled = !autoShowEnabled", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("ToggleHotkeyTextBox.Opacity = autoShowEnabled ? 0.45 : 1", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("ApplyAutoShowShortcutState();", settingsController, StringComparison.Ordinal);
+        Assert.Contains("_view.ToggleHotkeyTextBox.IsEnabled = !enabled", settingsController, StringComparison.Ordinal);
+        Assert.Contains("_view.ToggleHotkeyTextBox.Opacity = enabled ? 0.45 : 1", settingsController, StringComparison.Ordinal);
         Assert.Contains("if (!_settingsStore.Config.AutoShowWithCodex)", trayService, StringComparison.Ordinal);
         Assert.Contains("RegisterHotkey(ToggleWindowHotkeyId", trayService, StringComparison.Ordinal);
         Assert.Contains("_hotkeyService.Unregister(ToggleWindowHotkeyId)", trayService, StringComparison.Ordinal);
