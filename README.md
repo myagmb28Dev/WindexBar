@@ -13,6 +13,7 @@
 - Account-wide current and weekly rate-limit windows, including reset countdowns when Codex exposes reset times.
 - Active Codex model and reasoning effort (including Max and Ultra when exposed).
 - Per-session context-window usage and cumulative token totals, grouped by project.
+- Observed weekly-limit impact for individual sessions, proportionally attributed by token growth when several sessions are active together.
 - Background Codex CLI compatibility checks with a 24-hour latest-version cache, automatic updates, an in-app progress gauge, post-update version verification, and an optional manual check button.
 - Automatic Codex CLI updates through auto-detected or selected PowerShell, npm, Bun, Homebrew, WinGet, or custom commands.
 - Automatic WindexBar updates from GitHub Releases, with a pinned RSA-signed manifest, SHA-256 verification, silent installation, and automatic restart.

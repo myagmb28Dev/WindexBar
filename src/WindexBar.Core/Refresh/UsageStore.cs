@@ -9,6 +9,7 @@ public sealed class UsageStore : IDisposable
 {
     private readonly SettingsStore _settings;
     private readonly ProviderDescriptor _codexDescriptor;
+    private readonly WeeklyLimitImpactTracker? _weeklyLimitImpactTracker;
     private readonly object _sessionIndexWatcherLock = new();
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private PeriodicTimer? _timer;
@@ -18,10 +19,12 @@ public sealed class UsageStore : IDisposable
 
     public UsageStore(
         SettingsStore settings,
-        ProviderDescriptor? codexDescriptor = null)
+        ProviderDescriptor? codexDescriptor = null,
+        WeeklyLimitImpactTracker? weeklyLimitImpactTracker = null)
     {
         _settings = settings;
         _codexDescriptor = codexDescriptor ?? CodexProviderDescriptor.Create();
+        _weeklyLimitImpactTracker = weeklyLimitImpactTracker;
     }
 
     public UsageSnapshot? Snapshot { get; private set; }
@@ -77,7 +80,7 @@ public sealed class UsageStore : IDisposable
                 return;
             }
 
-            Snapshot = outcome.Result.Usage;
+            Snapshot = _weeklyLimitImpactTracker?.Apply(outcome.Result.Usage) ?? outcome.Result.Usage;
             Credits = outcome.Result.Credits;
             LastSourceLabel = outcome.Result.SourceLabel;
             LastError = null;

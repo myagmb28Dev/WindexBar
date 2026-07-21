@@ -53,7 +53,8 @@ public sealed record CodexSessionUsageSnapshot(
     string? SessionName,
     string? ProjectPath,
     TokenUsageSnapshot TokenUsage,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    double? WeeklyLimitImpactPercent = null);
 
 public sealed record CreditEvent(Guid Id, DateTimeOffset Date, string Service, double CreditsUsed);
 

@@ -53,7 +53,9 @@ public partial class App : WinApplication
             return;
         }
 
-        UsageStore = new UsageStore(SettingsStore);
+        UsageStore = new UsageStore(
+            SettingsStore,
+            weeklyLimitImpactTracker: new WeeklyLimitImpactTracker(new WeeklyLimitImpactStateStore()));
         _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
         _appUpdateHttpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
         CodexCliUpdateService = new CodexCliUpdateService(

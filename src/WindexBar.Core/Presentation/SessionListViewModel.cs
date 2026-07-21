@@ -68,10 +68,13 @@ public static class SessionListViewModelFactory
             session.UpdatedAt,
             percent is null ? Text(language, "unknown", "\uC54C \uC218 \uC5C6\uC74C") : $"{percent.Value:0.#}%",
             percent ?? 0,
-            FormatTokenDetails(session.TokenUsage, language));
+            FormatTokenDetails(session.TokenUsage, session.WeeklyLimitImpactPercent, language));
     }
 
-    private static string FormatTokenDetails(TokenUsageSnapshot tokenUsage, string language)
+    private static string FormatTokenDetails(
+        TokenUsageSnapshot tokenUsage,
+        double? weeklyLimitImpactPercent,
+        string language)
     {
         var values = new List<string>();
         var current = tokenUsage.Last ?? tokenUsage.Total;
@@ -89,8 +92,16 @@ public static class SessionListViewModelFactory
             values.Add($"{Text(language, "Session total", "\uC138\uC158 \uD569\uACC4")}: {TokenCountFormatter.Format(tokenUsage.Total.TotalTokens, language)}");
         }
 
+        if (weeklyLimitImpactPercent is not null)
+        {
+            values.Add($"{Text(language, "Weekly limit impact", "\uC8FC\uAC04 \uD55C\uB3C4 \uC601\uD5A5")}: {FormatImpact(weeklyLimitImpactPercent.Value)}");
+        }
+
         return values.Count == 0 ? Text(language, "unknown", "\uC54C \uC218 \uC5C6\uC74C") : string.Join(Environment.NewLine, values);
     }
+
+    private static string FormatImpact(double impact) =>
+        impact <= 0.0001 ? "0%" : $"-{impact:0.##}%";
 
     private static string SessionDisplayName(CodexSessionUsageSnapshot session, string language)
     {
