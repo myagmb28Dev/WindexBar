@@ -1984,8 +1984,8 @@ public sealed class InstallerBuildScriptTests
         var trayService = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "TrayIconService.cs")));
 
         Assert.Contains("ApplyAutoShowShortcutState();", settingsController, StringComparison.Ordinal);
-        Assert.Contains("_view.ToggleHotkeyTextBox.IsEnabled = !enabled", settingsController, StringComparison.Ordinal);
-        Assert.Contains("_view.ToggleHotkeyTextBox.Opacity = enabled ? 0.45 : 1", settingsController, StringComparison.Ordinal);
+        Assert.Contains("_view.ToggleHotkeyButton.IsEnabled = !enabled", settingsController, StringComparison.Ordinal);
+        Assert.Contains("_view.ToggleHotkeyButton.Opacity = enabled ? 0.45 : 1", settingsController, StringComparison.Ordinal);
         Assert.Contains("if (!_settingsStore.Config.AutoShowWithCodex)", trayService, StringComparison.Ordinal);
         Assert.Contains("RegisterHotkey(ToggleWindowHotkeyId", trayService, StringComparison.Ordinal);
         Assert.Contains("_hotkeyService.Unregister(ToggleWindowHotkeyId)", trayService, StringComparison.Ordinal);
