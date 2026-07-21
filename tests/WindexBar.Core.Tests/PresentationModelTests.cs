@@ -58,7 +58,8 @@ public sealed class PresentationModelTests
         Assert.Equal(@"D:\Codes\WindexBar", projectFirst.Projects[0].Sessions[0].ProjectPath);
         Assert.Equal(now.AddMinutes(1), projectFirst.Projects[0].Sessions[0].UpdatedAt);
         Assert.Equal("25%", projectFirst.Projects[0].Sessions[0].ContextPercentText);
-        Assert.Contains("세션 합계", projectFirst.Projects[0].Sessions[0].TokenDetails);
+        Assert.DoesNotContain("세션 합계", projectFirst.Projects[0].Sessions[0].TokenDetails);
+        Assert.Contains("세션 합계", projectFirst.Projects[0].Sessions[0].DetailedTokenDetails);
     }
 
     [Theory]

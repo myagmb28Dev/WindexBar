@@ -10,7 +10,8 @@ public sealed record SessionCardViewModel(
     DateTimeOffset UpdatedAt,
     string ContextPercentText,
     double ContextPercent,
-    string TokenDetails);
+    string TokenDetails,
+    string DetailedTokenDetails);
 
 public sealed record SessionProjectViewModel(
     string Key,
@@ -68,13 +69,15 @@ public static class SessionListViewModelFactory
             session.UpdatedAt,
             percent is null ? Text(language, "unknown", "\uC54C \uC218 \uC5C6\uC74C") : $"{percent.Value:0.#}%",
             percent ?? 0,
-            FormatTokenDetails(session.TokenUsage, session.WeeklyLimitImpactPercent, language));
+            FormatTokenDetails(session.TokenUsage, session.WeeklyLimitImpactPercent, language, includeSessionTotal: false),
+            FormatTokenDetails(session.TokenUsage, session.WeeklyLimitImpactPercent, language, includeSessionTotal: true));
     }
 
     private static string FormatTokenDetails(
         TokenUsageSnapshot tokenUsage,
         double? weeklyLimitImpactPercent,
-        string language)
+        string language,
+        bool includeSessionTotal)
     {
         var values = new List<string>();
         var current = tokenUsage.Last ?? tokenUsage.Total;
@@ -87,7 +90,7 @@ public static class SessionListViewModelFactory
             values.Add(TokenCountFormatter.Format(current.TotalTokens, language));
         }
 
-        if (tokenUsage.Total is not null)
+        if (includeSessionTotal && tokenUsage.Total is not null)
         {
             values.Add($"{Text(language, "Session total", "\uC138\uC158 \uD569\uACC4")}: {TokenCountFormatter.Format(tokenUsage.Total.TotalTokens, language)}");
         }

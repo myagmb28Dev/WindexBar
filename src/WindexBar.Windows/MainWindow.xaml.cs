@@ -938,7 +938,7 @@ public sealed partial class MainWindow : Window
         AddPopupDetail(detailsPanel, Text("Path", "\uACBD\uB85C"), session.ProjectPath ?? UnknownText);
         AddPopupDetail(detailsPanel, Text("Session ID", "\uC138\uC158 ID"), session.SessionId);
         AddPopupDetail(detailsPanel, Text("Context", "\uCEE8\uD14D\uC2A4\uD2B8"), session.ContextPercentText);
-        AddPopupDetail(detailsPanel, Text("Token usage", "\uD1A0\uD070 \uC0AC\uC6A9\uB7C9"), session.TokenDetails);
+        AddPopupDetail(detailsPanel, Text("Token usage", "\uD1A0\uD070 \uC0AC\uC6A9\uB7C9"), session.DetailedTokenDetails);
         AddPopupDetail(
             detailsPanel,
             Text("Last activity", "\uB9C8\uC9C0\uB9C9 \uD65C\uB3D9"),
@@ -962,7 +962,7 @@ public sealed partial class MainWindow : Window
                 $"{Text("Path", "\uACBD\uB85C")}: {session.ProjectPath ?? UnknownText}",
                 $"{Text("Session ID", "\uC138\uC158 ID")}: {session.SessionId}",
                 $"{Text("Context", "\uCEE8\uD14D\uC2A4\uD2B8")}: {session.ContextPercentText}",
-                session.TokenDetails,
+                session.DetailedTokenDetails,
                 $"{Text("Last activity", "\uB9C8\uC9C0\uB9C9 \uD65C\uB3D9")}: {session.UpdatedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}"));
             ShowCopiedFeedback(copyButton);
         };
