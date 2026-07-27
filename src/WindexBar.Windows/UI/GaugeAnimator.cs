@@ -36,6 +36,7 @@ internal sealed class GaugeAnimator : IDisposable
     private GaugeBar? _previewBar;
     private Func<StyleConfig>? _previewStyleProvider;
     private Func<bool>? _previewVisibleProvider;
+    private GaugeAppearance? _lastAppliedAppearance;
     private double _sweepPhase;
     private double _previewSweepPhase;
 
@@ -46,7 +47,17 @@ internal sealed class GaugeAnimator : IDisposable
         _timer.Tick += OnTick;
     }
 
-    public void Start() => _timer.Start();
+    public void SetActive(bool active)
+    {
+        if (active)
+        {
+            _timer.Start();
+        }
+        else
+        {
+            _timer.Stop();
+        }
+    }
 
     public void SetPrimaryBars(params GaugeBar[] bars) => _primaryBars = bars;
 
@@ -93,10 +104,20 @@ internal sealed class GaugeAnimator : IDisposable
 
     public void ApplyAppearance(StyleConfig style)
     {
+        var appearance = new GaugeAppearance(
+            StyleConfig.NormalizeGaugeThickness(style.GaugeThickness),
+            StyleConfig.NormalizeGaugeColor(style.GaugeColor));
+        if (_lastAppliedAppearance == appearance)
+        {
+            return;
+        }
+
         foreach (var bar in _primaryBars.Concat(_sessionBars))
         {
             ApplyAppearance(bar, style);
         }
+
+        _lastAppliedAppearance = appearance;
     }
 
     public void RefreshPreview()
@@ -230,6 +251,8 @@ internal sealed class GaugeAnimator : IDisposable
             byte.MaxValue);
         return global::Windows.UI.Color.FromArgb(0xFF, Blend(color.R), Blend(color.G), Blend(color.B));
     }
+
+    private readonly record struct GaugeAppearance(string Thickness, string Color);
 
     public void Dispose()
     {

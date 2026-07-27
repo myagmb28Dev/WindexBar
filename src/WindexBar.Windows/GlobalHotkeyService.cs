@@ -42,7 +42,7 @@ internal sealed class GlobalHotkeyService : IDisposable
             return false;
         }
 
-        if (!TryGetVirtualKey(shortcut.Key, out var virtualKey))
+        if (!HotkeyKeyMapper.TryGetVirtualKey(shortcut.Key, out var virtualKey))
         {
             error = "Unsupported shortcut key.";
             return false;
@@ -109,46 +109,6 @@ internal sealed class GlobalHotkeyService : IDisposable
         _disposed = true;
         UnregisterAll();
         _window.Dispose();
-    }
-
-    private static bool TryGetVirtualKey(string key, out uint virtualKey)
-    {
-        virtualKey = 0;
-        if (key.Length == 1 && char.IsLetterOrDigit(key[0]))
-        {
-            virtualKey = char.ToUpperInvariant(key[0]);
-            return true;
-        }
-
-        if (key.Length is >= 2 and <= 3
-            && key[0] == 'F'
-            && int.TryParse(key[1..], out var functionKey)
-            && functionKey is >= 1 and <= 24)
-        {
-            virtualKey = (uint)(0x70 + functionKey - 1);
-            return true;
-        }
-
-        virtualKey = key switch
-        {
-            "Space" => 0x20,
-            "Escape" => 0x1B,
-            "Tab" => 0x09,
-            "Enter" => 0x0D,
-            "Backspace" => 0x08,
-            "Insert" => 0x2D,
-            "Delete" => 0x2E,
-            "Home" => 0x24,
-            "End" => 0x23,
-            "PageUp" => 0x21,
-            "PageDown" => 0x22,
-            "Up" => 0x26,
-            "Down" => 0x28,
-            "Left" => 0x25,
-            "Right" => 0x27,
-            _ => 0
-        };
-        return virtualKey != 0;
     }
 
     [DllImport("user32.dll", SetLastError = true)]

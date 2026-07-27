@@ -1,5 +1,5 @@
-using System.Text.Json;
 using WindexBar.Core.Models;
+using WindexBar.Core.Persistence;
 using WindexBar.Core.Presentation;
 
 namespace WindexBar.Core.Refresh;
@@ -26,38 +26,17 @@ public sealed class WeeklyLimitImpactStateStore(string? filePath = null) : IWeek
     public string FilePath { get; } = filePath ?? DefaultPath();
 
     public WeeklyLimitImpactState Load()
-    {
-        try
-        {
-            if (!File.Exists(FilePath))
-            {
-                return new WeeklyLimitImpactState();
-            }
-
-            var json = File.ReadAllText(FilePath);
-            return JsonSerializer.Deserialize(json, WindexBarJsonContext.Default.WeeklyLimitImpactState)
-                ?? new WeeklyLimitImpactState();
-        }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
-        {
-            return new WeeklyLimitImpactState();
-        }
-    }
+        => JsonFileStore.LoadOrDefault(
+            FilePath,
+            WindexBarJsonContext.Default.WeeklyLimitImpactState,
+            static () => new WeeklyLimitImpactState());
 
     public void Save(WeeklyLimitImpactState state)
     {
-        try
-        {
-            var directory = Path.GetDirectoryName(FilePath)!;
-            Directory.CreateDirectory(directory);
-            var temporaryPath = FilePath + ".tmp";
-            var json = JsonSerializer.Serialize(state, WindexBarJsonContext.Default.WeeklyLimitImpactState);
-            File.WriteAllText(temporaryPath, json);
-            File.Move(temporaryPath, FilePath, true);
-        }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-        {
-        }
+        JsonFileStore.TrySaveAtomic(
+            FilePath,
+            state,
+            WindexBarJsonContext.Default.WeeklyLimitImpactState);
     }
 
     public static string DefaultPath()
@@ -142,7 +121,14 @@ public sealed class WeeklyLimitImpactTracker
         var usedPercentDelta = weekly.UsedPercent - _state.LastUsedPercent.Value;
         if (usedPercentDelta > PercentTolerance)
         {
-            AttributeImpact(usedPercentDelta);
+            _state.UnattributedImpact += usedPercentDelta;
+            stateChanged = true;
+        }
+
+        if (_state.UnattributedImpact > PercentTolerance && HasPendingSessionTokens())
+        {
+            AttributeImpact(_state.UnattributedImpact);
+            _state.UnattributedImpact = 0;
             _state.PendingSessionTokens.Clear();
             stateChanged = true;
         }
@@ -167,20 +153,17 @@ public sealed class WeeklyLimitImpactTracker
             .Where(item => item.Value > 0)
             .ToArray();
         var totalChangedTokens = changedSessions.Sum(item => item.Value);
-        if (totalChangedTokens > 0)
+        foreach (var (sessionId, tokenDelta) in changedSessions)
         {
-            foreach (var (sessionId, tokenDelta) in changedSessions)
-            {
-                Add(
-                    _state.SessionImpacts,
-                    sessionId,
-                    usedPercentDelta * tokenDelta / totalChangedTokens);
-            }
-            return;
+            Add(
+                _state.SessionImpacts,
+                sessionId,
+                usedPercentDelta * tokenDelta / totalChangedTokens);
         }
-
-        _state.UnattributedImpact += usedPercentDelta;
     }
+
+    private bool HasPendingSessionTokens() =>
+        _state.PendingSessionTokens.Any(item => item.Value > 0);
 
     private UsageSnapshot WithImpacts(
         UsageSnapshot snapshot,

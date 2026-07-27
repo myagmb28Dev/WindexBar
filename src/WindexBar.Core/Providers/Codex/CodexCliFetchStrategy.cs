@@ -13,9 +13,6 @@ public sealed class CodexCliFetchStrategy : IProviderFetchStrategy
         _transportFactory = transportFactory ?? new ProcessCodexRpcTransportFactory();
     }
 
-    public string Id => "codex.cli";
-    public ProviderFetchKind Kind => ProviderFetchKind.Cli;
-
     public Task<bool> IsAvailableAsync(ProviderFetchContext context, CancellationToken cancellationToken)
     {
         return Task.FromResult(CommandLocator.ResolveExecutable(null, context.Environment) is not null);
@@ -63,9 +60,9 @@ public sealed class CodexCliFetchStrategy : IProviderFetchStrategy
             throw new InvalidOperationException("Codex returned no rate limits or credits.");
         }
 
-        usage ??= new UsageSnapshot(null, null, null, now, null);
+        usage ??= new UsageSnapshot(null, null, now, null);
         usage = usage with { ActiveModel = activeModel, TokenUsage = tokenUsage, Sessions = sessions };
-        return new ProviderFetchResult(usage, credits, "codex-cli", Id, Kind);
+        return new ProviderFetchResult(usage, credits);
     }
 
     public bool ShouldFallback(Exception error, ProviderFetchContext context) => false;

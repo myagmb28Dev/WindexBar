@@ -5,10 +5,14 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $AppName = 'WindexBar'
-$AppVersion = '1.0.0'
 $Publisher = 'WindexBar'
 $Root = Resolve-Path (Join-Path $PSScriptRoot '..')
 $RootPath = $Root.Path
+$BuildProperties = [xml](Get-Content -Raw (Join-Path $RootPath 'Directory.Build.props'))
+$AppVersion = $BuildProperties.Project.PropertyGroup.Version.InnerText
+if ([string]::IsNullOrWhiteSpace($AppVersion)) {
+    throw 'Version was not found in Directory.Build.props.'
+}
 $ArtifactsRoot = Join-Path $RootPath 'artifacts'
 $PublishDir = Join-Path $ArtifactsRoot 'install\win-x64'
 $ProgramsRoot = Join-Path $env:LOCALAPPDATA 'Programs'

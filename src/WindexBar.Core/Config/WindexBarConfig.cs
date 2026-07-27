@@ -5,10 +5,7 @@ namespace WindexBar.Core.Config;
 
 public sealed class WindexBarConfig
 {
-    public const int CurrentVersion = 10;
-    public const int MinRefreshIntervalSeconds = 1;
-    public const int DefaultRefreshIntervalSeconds = 30;
-    public const int MaxRefreshIntervalSeconds = 3600;
+    public const int CurrentVersion = 11;
     public const string DefaultLanguage = "en";
     public const string DefaultToggleWindowHotkey = "Alt+O";
     public const string DefaultToggleSidebarHotkey = "Alt+B";
@@ -20,9 +17,6 @@ public sealed class WindexBarConfig
 
     [JsonPropertyName("providers")]
     public List<ProviderConfig> Providers { get; set; } = [ProviderConfig.DefaultCodex()];
-
-    [JsonPropertyName("clickThroughHud")]
-    public bool ClickThroughHud { get; set; }
 
     [JsonPropertyName("startWithWindows")]
     public bool StartWithWindows { get; set; } = DefaultStartWithWindows;
@@ -70,7 +64,7 @@ public sealed class WindexBarConfig
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var normalized = new List<ProviderConfig>();
-        foreach (var provider in Providers)
+        foreach (var provider in Providers?.OfType<ProviderConfig>() ?? [])
         {
             if (string.IsNullOrWhiteSpace(provider.Id) || !seen.Add(provider.Id))
             {
@@ -300,22 +294,11 @@ public sealed class ProviderConfig
     [JsonPropertyName("enabled")]
     public bool Enabled { get; set; } = true;
 
-    [JsonPropertyName("source")]
-    public string Source { get; set; } = "cli";
-
-    [JsonPropertyName("refreshIntervalSeconds")]
-    public int RefreshIntervalSeconds { get; set; } = WindexBarConfig.DefaultRefreshIntervalSeconds;
-
     public static ProviderConfig DefaultCodex() => new();
 
     public ProviderConfig Normalized()
     {
         Id = string.IsNullOrWhiteSpace(Id) ? "codex" : Id.Trim().ToLowerInvariant();
-        Source = string.IsNullOrWhiteSpace(Source) ? "cli" : Source.Trim().ToLowerInvariant();
-        RefreshIntervalSeconds = Math.Clamp(
-            RefreshIntervalSeconds <= 0 ? WindexBarConfig.DefaultRefreshIntervalSeconds : RefreshIntervalSeconds,
-            WindexBarConfig.MinRefreshIntervalSeconds,
-            WindexBarConfig.MaxRefreshIntervalSeconds);
         return this;
     }
 }

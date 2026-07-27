@@ -15,7 +15,8 @@ internal static class OwnedPopupWindow
         double rasterizationScale,
         double logicalWidth,
         double logicalHeight,
-        int verticalOffset = 72)
+        int verticalOffset = 72,
+        Action? onDeactivated = null)
     {
         var popup = new Window { Title = title };
         popup.Content = new Border
@@ -47,7 +48,14 @@ internal static class OwnedPopupWindow
         {
             if (args.WindowActivationState == WindowActivationState.Deactivated && hasActivated)
             {
-                popup.Close();
+                if (onDeactivated is null)
+                {
+                    popup.Close();
+                }
+                else
+                {
+                    onDeactivated();
+                }
                 return;
             }
 

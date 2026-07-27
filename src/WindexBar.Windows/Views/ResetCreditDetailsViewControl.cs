@@ -33,11 +33,7 @@ internal sealed class ResetCreditDetailsViewControl : UserControl
             FontSize = 16,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
         };
-        TitleText.PointerPressed += (_, args) =>
-        {
-            HomeRequested?.Invoke(this, EventArgs.Empty);
-            args.Handled = true;
-        };
+        FeatureViewHelpers.AttachHomeNavigation(TitleText, () => HomeRequested?.Invoke(this, EventArgs.Empty));
         grid.Children.Add(TitleText);
         var divider = FeatureViewHelpers.CreateDivider();
         Grid.SetRow(divider, 1);

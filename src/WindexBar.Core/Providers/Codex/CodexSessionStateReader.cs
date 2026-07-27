@@ -1,5 +1,7 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text.Json;
+using static WindexBar.Core.Providers.Codex.JsonElementValueReader;
 using WindexBar.Core.Models;
 
 namespace WindexBar.Core.Providers.Codex;
@@ -7,6 +9,14 @@ namespace WindexBar.Core.Providers.Codex;
 public static class CodexSessionStateReader
 {
     private const int MaxSessionFilesToScan = 40;
+    private const int MaxCachedSessionFiles = MaxSessionFilesToScan * 4;
+    private const int MaxCachedMetadataFiles = 32;
+    private static readonly ConcurrentDictionary<string, CachedSessionFile> SessionFileCache =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, CachedSessionNames> SessionNameCache =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, CachedConfigDefaults> ConfigDefaultsCache =
+        new(StringComparer.OrdinalIgnoreCase);
 
     public static CodexModelSelection? ReadLatest(IReadOnlyDictionary<string, string>? environment = null)
     {
@@ -75,7 +85,7 @@ public static class CodexSessionStateReader
                      .OrderByDescending(file => file.LastWriteTimeUtc)
                      .Take(MaxSessionFilesToScan))
         {
-            var state = ReadSessionFile(file.FullName, out var isSubagent);
+            var state = ReadSessionFile(file, out var isSubagent);
             if (state is null || isSubagent)
             {
                 continue;
@@ -134,9 +144,14 @@ public static class CodexSessionStateReader
     {
         var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var indexPath = Path.Combine(codexHome, "session_index.jsonl");
-        if (!File.Exists(indexPath))
+        if (!TryGetFileStamp(indexPath, out var stamp))
         {
             return names;
+        }
+
+        if (SessionNameCache.TryGetValue(indexPath, out var cached) && cached.Stamp == stamp)
+        {
+            return cached.Names;
         }
 
         try
@@ -162,17 +177,44 @@ public static class CodexSessionStateReader
         }
         catch (IOException)
         {
+            return names;
         }
         catch (UnauthorizedAccessException)
         {
+            return names;
         }
 
+        SessionNameCache[indexPath] = new CachedSessionNames(stamp, names);
+        TrimCache(SessionNameCache, MaxCachedMetadataFiles);
         return names;
     }
 
-    private static CodexSessionStateSnapshot? ReadSessionFile(string path, out bool isSubagent)
+    private static CodexSessionStateSnapshot? ReadSessionFile(FileInfo file, out bool isSubagent)
+    {
+        var stamp = new FileStamp(file.Length, file.LastWriteTimeUtc.Ticks);
+        if (SessionFileCache.TryGetValue(file.FullName, out var cached) && cached.Stamp == stamp)
+        {
+            isSubagent = cached.IsSubagent;
+            return cached.State;
+        }
+
+        var state = ReadSessionFileUncached(file.FullName, out isSubagent, out var readCompleted);
+        if (readCompleted)
+        {
+            SessionFileCache[file.FullName] = new CachedSessionFile(stamp, state, isSubagent);
+            TrimCache(SessionFileCache, MaxCachedSessionFiles);
+        }
+
+        return state;
+    }
+
+    private static CodexSessionStateSnapshot? ReadSessionFileUncached(
+        string path,
+        out bool isSubagent,
+        out bool readCompleted)
     {
         isSubagent = false;
+        readCompleted = false;
         CodexModelSelection? latestSelection = null;
         TokenUsageSnapshot? latestTokenUsage = null;
         string? sessionId = null;
@@ -264,6 +306,7 @@ public static class CodexSessionStateReader
             return CreateSessionState(latestSelection, modelLimits, latestTokenUsage, sessionId, projectPath, provisionalSessionName);
         }
 
+        readCompleted = true;
         return CreateSessionState(latestSelection, modelLimits, latestTokenUsage, sessionId, projectPath, provisionalSessionName);
     }
 
@@ -449,15 +492,14 @@ public static class CodexSessionStateReader
             resetsAt = DateTimeOffset.FromUnixTimeSeconds(resetsAtUnix);
         }
 
-        var resetDescription = resetsAt.HasValue ? CodexUsageMapper.ResetDescription(resetsAt.Value) : null;
-        return new RateWindow(usedPercent, windowMinutes, resetsAt, resetDescription);
+        return new RateWindow(usedPercent, windowMinutes, resetsAt);
     }
 
     private static string ReadRateLimitModelName(JsonElement limits)
     {
         return TryGetStringAny(limits, out var limitName, "limit_name", "limitName")
             || TryGetStringAny(limits, out limitName, "limit_id", "limitId")
-            ? CodexUsageMapper.FormatModelName(limitName!)
+            ? CodexModelNaming.FormatModelName(limitName!)
             : "Codex";
     }
 
@@ -708,38 +750,6 @@ public static class CodexSessionStateReader
         return TryGetPropertyAny(element, out var property, names) && TryReadInt64(property, out value);
     }
 
-    private static bool TryReadDouble(JsonElement value, out double result)
-    {
-        if (value.ValueKind is JsonValueKind.Number)
-        {
-            return value.TryGetDouble(out result);
-        }
-
-        if (value.ValueKind is JsonValueKind.String)
-        {
-            return double.TryParse(value.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out result);
-        }
-
-        result = 0;
-        return false;
-    }
-
-    private static bool TryReadInt64(JsonElement value, out long result)
-    {
-        if (value.ValueKind is JsonValueKind.Number)
-        {
-            return value.TryGetInt64(out result);
-        }
-
-        if (value.ValueKind is JsonValueKind.String)
-        {
-            return long.TryParse(value.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out result);
-        }
-
-        result = 0;
-        return false;
-    }
-
     private static string ToCamelCase(string name)
     {
         var builder = new System.Text.StringBuilder();
@@ -828,42 +838,105 @@ public static class CodexSessionStateReader
     private static CodexModelSelection? ReadConfigDefaults(string codexHome)
     {
         var configPath = Path.Combine(codexHome, "config.toml");
-        if (!File.Exists(configPath))
+        if (!TryGetFileStamp(configPath, out var stamp))
         {
             return null;
+        }
+
+        if (ConfigDefaultsCache.TryGetValue(configPath, out var cached) && cached.Stamp == stamp)
+        {
+            return cached.Selection;
         }
 
         string? model = null;
         string? effort = null;
         string? serviceTier = null;
 
-        foreach (var rawLine in File.ReadLines(configPath))
+        try
         {
-            var line = StripTomlComment(rawLine).Trim();
-            if (line.Length == 0)
+            foreach (var rawLine in File.ReadLines(configPath))
             {
-                continue;
-            }
+                var line = StripTomlComment(rawLine).Trim();
+                if (line.Length == 0)
+                {
+                    continue;
+                }
 
-            if (TryReadTomlString(line, "model", out var parsedModel))
-            {
-                model = parsedModel;
-                continue;
-            }
+                if (TryReadTomlString(line, "model", out var parsedModel))
+                {
+                    model = parsedModel;
+                    continue;
+                }
 
-            if (TryReadTomlString(line, "model_reasoning_effort", out var parsedEffort))
-            {
-                effort = parsedEffort;
-                continue;
-            }
+                if (TryReadTomlString(line, "model_reasoning_effort", out var parsedEffort))
+                {
+                    effort = parsedEffort;
+                    continue;
+                }
 
-            if (TryReadTomlString(line, "service_tier", out var parsedServiceTier))
-            {
-                serviceTier = parsedServiceTier;
+                if (TryReadTomlString(line, "service_tier", out var parsedServiceTier))
+                {
+                    serviceTier = parsedServiceTier;
+                }
             }
         }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
 
-        return string.IsNullOrWhiteSpace(model) ? null : CreateSelection(model, effort, serviceTier, File.GetLastWriteTimeUtc(configPath));
+        var selection = string.IsNullOrWhiteSpace(model)
+            ? null
+            : CreateSelection(
+                model,
+                effort,
+                serviceTier,
+                new DateTimeOffset(new DateTime(stamp.LastWriteTimeUtcTicks, DateTimeKind.Utc)));
+        ConfigDefaultsCache[configPath] = new CachedConfigDefaults(stamp, selection);
+        TrimCache(ConfigDefaultsCache, MaxCachedMetadataFiles);
+        return selection;
+    }
+
+    private static bool TryGetFileStamp(string path, out FileStamp stamp)
+    {
+        stamp = default;
+        try
+        {
+            var file = new FileInfo(path);
+            if (!file.Exists)
+            {
+                return false;
+            }
+
+            stamp = new FileStamp(file.Length, file.LastWriteTimeUtc.Ticks);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static void TrimCache<TValue>(ConcurrentDictionary<string, TValue> cache, int maximumCount)
+    {
+        var excess = cache.Count - maximumCount;
+        if (excess <= 0)
+        {
+            return;
+        }
+
+        foreach (var key in cache.Keys.Take(excess))
+        {
+            cache.TryRemove(key, out _);
+        }
     }
 
     private static string StripTomlComment(string line)
@@ -921,61 +994,7 @@ public static class CodexSessionStateReader
     }
 
     private static CodexModelSelection CreateSelection(string model, string? effort, string? serviceTier, DateTimeOffset? updatedAt)
-    {
-        var modelName = CodexUsageMapper.FormatModelName(model);
-        var effortName = FormatReasoningEffort(effort);
-        var serviceTierName = FormatServiceTierForDisplay(serviceTier);
-        var displayName = string.Join(" ", new[] { modelName, effortName, serviceTierName }
-            .Where(part => !string.IsNullOrWhiteSpace(part)));
-        return new CodexModelSelection(model, NormalizeEffort(effort), NormalizeServiceTier(serviceTier), displayName, updatedAt);
-    }
-
-    private static string? FormatReasoningEffort(string? effort)
-    {
-        return NormalizeEffort(effort) switch
-        {
-            "ultra" => "Ultra",
-            "max" => "Max",
-            "xhigh" => "XHigh",
-            "high" => "High",
-            "medium" => "Medium",
-            "low" => "Low",
-            "minimal" => "Minimal",
-            "none" => "None",
-            _ => null
-        };
-    }
-
-    private static string? NormalizeEffort(string? effort)
-    {
-        var trimmed = effort?.Trim();
-        return string.IsNullOrWhiteSpace(trimmed) ? null : trimmed.ToLowerInvariant();
-    }
-
-    private static string? FormatServiceTierForDisplay(string? serviceTier)
-    {
-        return NormalizeServiceTier(serviceTier) switch
-        {
-            "fast" => "Fast",
-            _ => null
-        };
-    }
-
-    private static string? NormalizeServiceTier(string? serviceTier)
-    {
-        var trimmed = serviceTier?.Trim();
-        if (string.IsNullOrWhiteSpace(trimmed))
-        {
-            return null;
-        }
-
-        return trimmed.ToLowerInvariant() switch
-        {
-            "priority" => "fast",
-            "default" or "normal" => "standard",
-            var normalized => normalized
-        };
-    }
+        => CodexModelNaming.CreateSelection(model, effort, serviceTier, updatedAt);
 
     private static DateTimeOffset? TryGetTimestamp(JsonElement root)
     {
@@ -1034,6 +1053,21 @@ public static class CodexSessionStateReader
         value = property.GetString();
         return !string.IsNullOrWhiteSpace(value);
     }
+
+    private readonly record struct FileStamp(long Length, long LastWriteTimeUtcTicks);
+
+    private sealed record CachedSessionFile(
+        FileStamp Stamp,
+        CodexSessionStateSnapshot? State,
+        bool IsSubagent);
+
+    private sealed record CachedSessionNames(
+        FileStamp Stamp,
+        IReadOnlyDictionary<string, string> Names);
+
+    private sealed record CachedConfigDefaults(
+        FileStamp Stamp,
+        CodexModelSelection? Selection);
 }
 
 public sealed record CodexSessionStateSnapshot(

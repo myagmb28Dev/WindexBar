@@ -18,7 +18,6 @@ internal sealed class ForegroundCodexActivityService : IDisposable
         _timer.Tick += (_, _) => Poll();
     }
 
-    public event EventHandler<bool>? ActivityChanged;
     public event EventHandler<bool>? ActivitySampled;
 
     public bool IsActive => _isActive;
@@ -63,11 +62,11 @@ internal sealed class ForegroundCodexActivityService : IDisposable
         if (CodexActivityWindowMatcher.IsWindexBarWindow(foregroundWindow.Window))
         {
             var hasPreviousCodexWindow = _lastCodexForegroundWindow != IntPtr.Zero
-                && IsWindow(_lastCodexForegroundWindow);
+                && NativeWindowState.Exists(_lastCodexForegroundWindow);
             var shouldPreserve = AutoVisibilityPolicy.ShouldPreserveWhileOwnWindowFocused(
                 hasPreviousCodexWindow,
-                hasPreviousCodexWindow && IsWindowVisible(_lastCodexForegroundWindow),
-                hasPreviousCodexWindow && IsIconic(_lastCodexForegroundWindow));
+                hasPreviousCodexWindow && NativeWindowState.IsVisible(_lastCodexForegroundWindow),
+                hasPreviousCodexWindow && NativeWindowState.IsMinimized(_lastCodexForegroundWindow));
             if (shouldPreserve)
             {
                 return;
@@ -97,12 +96,11 @@ internal sealed class ForegroundCodexActivityService : IDisposable
         }
 
         _isActive = value;
-        ActivityChanged?.Invoke(this, value);
     }
 
     private static ForegroundWindowInfo? ReadForegroundWindow()
     {
-        var handle = GetForegroundWindow();
+        var handle = NativeWindowState.ForegroundHandle;
         if (handle == IntPtr.Zero)
         {
             return null;
@@ -117,17 +115,28 @@ internal sealed class ForegroundCodexActivityService : IDisposable
         try
         {
             using var process = Process.GetProcessById((int)processId);
+            var basicWindow = new CodexActivityWindowSnapshot(
+                process.ProcessName,
+                ReadWindowTitle(handle),
+                []);
+            if (CodexActivityWindowMatcher.IsWindexBarWindow(basicWindow)
+                || CodexActivityWindowMatcher.IsCodexActivity(basicWindow)
+                || !CodexActivityWindowMatcher.IsTerminalProcess(process.ProcessName))
+            {
+                return new ForegroundWindowInfo(handle, basicWindow);
+            }
+
             var processes = ReadProcessInfos();
             return new ForegroundWindowInfo(
                 handle,
-                new CodexActivityWindowSnapshot(
-                    process.ProcessName,
-                    ReadWindowTitle(handle),
-                    ReadDescendantProcessNames(process.Id, processes),
-                    CodexActivityWindowMatcher.HasTerminalCodexProcess(
+                basicWindow with
+                {
+                    DescendantProcessNames = ReadDescendantProcessNames(process.Id, processes),
+                    HasTerminalCodexProcess = CodexActivityWindowMatcher.HasTerminalCodexProcess(
                         processes
                             .Select(item => new CodexActivityProcessSnapshot(item.ProcessId, item.ParentProcessId, item.Name))
-                            .ToArray())));
+                            .ToArray())
+                });
         }
         catch
         {
@@ -219,21 +228,6 @@ internal sealed class ForegroundCodexActivityService : IDisposable
         _disposed = true;
         Stop();
     }
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr GetForegroundWindow();
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool IsWindow(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool IsWindowVisible(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool IsIconic(IntPtr hWnd);
 
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);

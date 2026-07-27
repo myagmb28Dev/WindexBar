@@ -1,5 +1,5 @@
-using System.Text.Json;
 using WindexBar.Core;
+using WindexBar.Core.Persistence;
 
 namespace WindexBar.Core.Config;
 
@@ -14,23 +14,33 @@ public sealed class WindexBarConfigStore
 
     public WindexBarConfig LoadOrCreateDefault()
     {
-        if (!File.Exists(FilePath))
+        try
         {
-            var created = WindexBarConfig.Default();
-            Save(created);
-            return created;
-        }
+            if (!File.Exists(FilePath))
+            {
+                var created = WindexBarConfig.Default();
+                Save(created);
+                return created;
+            }
 
-        var json = File.ReadAllText(FilePath);
-        var config = JsonSerializer.Deserialize(json, WindexBarJsonContext.Default.WindexBarConfig) ?? WindexBarConfig.Default();
-        return config.Normalized();
+            var config = JsonFileStore.LoadOrDefault(
+                FilePath,
+                WindexBarJsonContext.Default.WindexBarConfig,
+                WindexBarConfig.Default);
+            return config.Normalized();
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            return WindexBarConfig.Default();
+        }
     }
 
     public void Save(WindexBarConfig config)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-        var json = JsonSerializer.Serialize(config.Normalized(), WindexBarJsonContext.Default.WindexBarConfig);
-        File.WriteAllText(FilePath, json);
+        JsonFileStore.SaveAtomic(
+            FilePath,
+            config.Normalized(),
+            WindexBarJsonContext.Default.WindexBarConfig);
     }
 
     public static string DefaultPath()

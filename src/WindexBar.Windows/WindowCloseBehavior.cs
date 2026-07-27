@@ -64,7 +64,7 @@ internal static class WindowCloseBehavior
     public static bool IsVisible(Window window)
     {
         var handle = WindowNative.GetWindowHandle(window);
-        return handle != IntPtr.Zero && IsWindowVisible(handle) && !IsIconic(handle);
+        return NativeWindowState.IsVisible(handle) && !NativeWindowState.IsMinimized(handle);
     }
 
     [DllImport("user32.dll")]
@@ -81,18 +81,6 @@ internal static class WindowCloseBehavior
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool IsWindow(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool IsWindowVisible(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool IsIconic(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetWindowRect(IntPtr hWnd, out Rect rect);
 
     private static string Describe(IntPtr handle, bool showResult, bool positionResult, bool restoreResult, bool foregroundResult)
@@ -103,7 +91,7 @@ internal static class WindowCloseBehavior
             rectText = $"rect={rect.Left},{rect.Top},{rect.Right - rect.Left}x{rect.Bottom - rect.Top}";
         }
 
-        return $"HWND 0x{handle.ToInt64():X}; isWindow={IsWindow(handle)}; visible={IsWindowVisible(handle)}; {rectText}; show={showResult}; pos={positionResult}; restore={restoreResult}; foreground={foregroundResult}";
+        return $"HWND 0x{handle.ToInt64():X}; isWindow={NativeWindowState.Exists(handle)}; visible={NativeWindowState.IsVisible(handle)}; {rectText}; show={showResult}; pos={positionResult}; restore={restoreResult}; foreground={foregroundResult}";
     }
 
     private readonly struct Rect

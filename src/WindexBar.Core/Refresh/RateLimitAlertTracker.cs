@@ -1,6 +1,6 @@
-using System.Text.Json;
 using System.Text.Json.Serialization;
 using WindexBar.Core.Models;
+using WindexBar.Core.Persistence;
 
 namespace WindexBar.Core.Refresh;
 
@@ -41,38 +41,17 @@ public sealed class RateLimitAlertStateStore(string? filePath = null) : IRateLim
     public string FilePath { get; } = filePath ?? DefaultPath();
 
     public RateLimitAlertState Load()
-    {
-        try
-        {
-            if (!File.Exists(FilePath))
-            {
-                return new RateLimitAlertState();
-            }
-
-            var json = File.ReadAllText(FilePath);
-            return JsonSerializer.Deserialize(json, WindexBarJsonContext.Default.RateLimitAlertState)
-                ?? new RateLimitAlertState();
-        }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
-        {
-            return new RateLimitAlertState();
-        }
-    }
+        => JsonFileStore.LoadOrDefault(
+            FilePath,
+            WindexBarJsonContext.Default.RateLimitAlertState,
+            static () => new RateLimitAlertState());
 
     public void Save(RateLimitAlertState state)
     {
-        try
-        {
-            var directory = Path.GetDirectoryName(FilePath)!;
-            Directory.CreateDirectory(directory);
-            var temporaryPath = FilePath + ".tmp";
-            var json = JsonSerializer.Serialize(state, WindexBarJsonContext.Default.RateLimitAlertState);
-            File.WriteAllText(temporaryPath, json);
-            File.Move(temporaryPath, FilePath, true);
-        }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-        {
-        }
+        JsonFileStore.TrySaveAtomic(
+            FilePath,
+            state,
+            WindexBarJsonContext.Default.RateLimitAlertState);
     }
 
     public static string DefaultPath()

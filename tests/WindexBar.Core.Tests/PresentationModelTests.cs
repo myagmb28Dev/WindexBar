@@ -10,15 +10,14 @@ public sealed class PresentationModelTests
     {
         var now = new DateTimeOffset(2026, 7, 19, 12, 0, 0, TimeSpan.Zero);
         var snapshot = new UsageSnapshot(
-            new RateWindow(10, 300, now.AddHours(1), null),
-            new RateWindow(20, 10080, now.AddDays(1), null),
-            null,
+            new RateWindow(10, 300, now.AddHours(1)),
+            new RateWindow(20, 10080, now.AddDays(1)),
             now,
-            new ProviderIdentitySnapshot(UsageProvider.Codex, "me@example.com", null, "chatgpt"),
+            new ProviderIdentitySnapshot("me@example.com", "chatgpt"),
             [new ModelUsageSnapshot(
                 "gpt-5.6",
-                new RateWindow(25, 300, now.AddHours(2), null),
-                new RateWindow(40, 10080, now.AddDays(2), null))],
+                new RateWindow(25, 300, now.AddHours(2)),
+                new RateWindow(40, 10080, now.AddDays(2)))],
             new CodexModelSelection("gpt-5.6-high", "high", "fast", "GPT 5.6", now));
 
         var model = HudDisplayModelFactory.Create(snapshot, "network error", true, "ko", now);
@@ -98,7 +97,6 @@ public sealed class PresentationModelTests
     {
         var now = DateTimeOffset.UnixEpoch;
         var snapshot = new UsageSnapshot(
-            null,
             null,
             null,
             now,

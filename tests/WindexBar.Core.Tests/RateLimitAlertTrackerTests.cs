@@ -103,9 +103,8 @@ public sealed class RateLimitAlertTrackerTests
         DateTimeOffset? resetAt = null,
         DateTimeOffset? observedAt = null) =>
         new(
-            new RateWindow(current, 300, resetAt ?? ResetAt, null),
-            new RateWindow(weekly, 10_080, (resetAt ?? ResetAt).AddDays(6), null),
-            null,
+            new RateWindow(current, 300, resetAt ?? ResetAt),
+            new RateWindow(weekly, 10_080, (resetAt ?? ResetAt).AddDays(6)),
             observedAt ?? ResetAt,
             null);
 

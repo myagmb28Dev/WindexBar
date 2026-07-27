@@ -33,6 +33,15 @@ internal static class FeatureViewHelpers
         FontSize = 12
     };
 
+    public static void AttachHomeNavigation(TextBlock title, Action navigateHome)
+    {
+        title.PointerPressed += (_, args) =>
+        {
+            navigateHome();
+            args.Handled = true;
+        };
+    }
+
     public static void SetToolTip(string text, params FrameworkElement[] elements)
     {
         foreach (var element in elements)

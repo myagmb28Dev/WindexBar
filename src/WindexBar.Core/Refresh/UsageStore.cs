@@ -15,7 +15,7 @@ public sealed class UsageStore : IDisposable
     private IReadOnlyList<RateLimitThresholdAlert> _pendingRateLimitAlerts = [];
     private readonly object _sessionIndexWatcherLock = new();
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
-    private PeriodicTimer? _timer;
+    private readonly BackgroundRefreshDelayPolicy _refreshDelayPolicy = new();
     private CancellationTokenSource? _loopCts;
     private CancellationTokenSource? _sessionIndexDebounceCts;
     private FileSystemWatcher? _sessionIndexWatcher;
@@ -35,7 +35,6 @@ public sealed class UsageStore : IDisposable
     public UsageSnapshot? Snapshot { get; private set; }
     public CreditsSnapshot? Credits { get; private set; }
     public string? LastError { get; private set; }
-    public string? LastSourceLabel { get; private set; }
     public bool IsRefreshing { get; private set; }
 
     public IReadOnlyList<RateLimitThresholdAlert> TakeRateLimitAlerts()
@@ -55,7 +54,8 @@ public sealed class UsageStore : IDisposable
         await _refreshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await RefreshCoreAsync(cancellationToken).ConfigureAwait(false);
+            var succeeded = await RefreshCoreAsync(cancellationToken).ConfigureAwait(false);
+            _refreshDelayPolicy.RecordResult(succeeded);
         }
         finally
         {
@@ -63,7 +63,7 @@ public sealed class UsageStore : IDisposable
         }
     }
 
-    private async Task RefreshCoreAsync(CancellationToken cancellationToken)
+    private async Task<bool> RefreshCoreAsync(CancellationToken cancellationToken)
     {
         var providerConfig = _settings.Codex;
         if (!providerConfig.Enabled)
@@ -71,17 +71,15 @@ public sealed class UsageStore : IDisposable
             Snapshot = null;
             Credits = null;
             LastError = null;
-            LastSourceLabel = null;
             lock (_rateLimitAlertLock)
             {
                 _pendingRateLimitAlerts = [];
             }
             OnChanged();
-            return;
+            return true;
         }
 
         IsRefreshing = true;
-        OnChanged();
         try
         {
             var context = new ProviderFetchContext(
@@ -96,7 +94,7 @@ public sealed class UsageStore : IDisposable
             if (outcome.Result is null)
             {
                 LastError = outcome.ErrorDescription;
-                return;
+                return false;
             }
 
             Snapshot = _weeklyLimitImpactTracker?.Apply(outcome.Result.Usage) ?? outcome.Result.Usage;
@@ -107,8 +105,8 @@ public sealed class UsageStore : IDisposable
                     : [];
             }
             Credits = outcome.Result.Credits;
-            LastSourceLabel = outcome.Result.SourceLabel;
             LastError = null;
+            return true;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -117,6 +115,7 @@ public sealed class UsageStore : IDisposable
         catch (Exception error)
         {
             LastError = error.Message;
+            return false;
         }
         finally
         {
@@ -128,17 +127,25 @@ public sealed class UsageStore : IDisposable
     public void StartBackgroundRefresh()
     {
         StopBackgroundRefresh();
-        _loopCts = new CancellationTokenSource();
-        _timer = new PeriodicTimer(TimeSpan.FromSeconds(_settings.Codex.RefreshIntervalSeconds));
+        var loopCts = new CancellationTokenSource();
+        var loopToken = loopCts.Token;
+        _refreshDelayPolicy.Reset();
+        _loopCts = loopCts;
         StartSessionIndexWatcher();
         _ = Task.Run(async () =>
         {
-            await RefreshAsync(_loopCts.Token).ConfigureAwait(false);
-            while (_timer is not null && await _timer.WaitForNextTickAsync(_loopCts.Token).ConfigureAwait(false))
+            try
             {
-                await RefreshAsync(_loopCts.Token).ConfigureAwait(false);
+                while (true)
+                {
+                    await RefreshAsync(loopToken).ConfigureAwait(false);
+                    await Task.Delay(_refreshDelayPolicy.NextDelay, loopToken).ConfigureAwait(false);
+                }
             }
-        }, _loopCts.Token);
+            catch (OperationCanceledException) when (loopToken.IsCancellationRequested)
+            {
+            }
+        }, loopToken);
     }
 
     public void StopBackgroundRefresh()
@@ -147,8 +154,6 @@ public sealed class UsageStore : IDisposable
         _loopCts?.Cancel();
         _loopCts?.Dispose();
         _loopCts = null;
-        _timer?.Dispose();
-        _timer = null;
     }
 
     private void StartSessionIndexWatcher()

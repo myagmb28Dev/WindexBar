@@ -100,8 +100,11 @@ public static class CodexActivityWindowMatcher
             || string.Equals(processName, "WindexBar", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool IsTerminalProcess(string? processName) =>
-        processName is not null && TerminalProcessNames.Contains(processName);
+    public static bool IsTerminalProcess(string? processName)
+    {
+        var normalized = NormalizeProcessName(processName);
+        return normalized is not null && TerminalProcessNames.Contains(normalized);
+    }
 
     private static string? NormalizeProcessName(string? processName)
     {

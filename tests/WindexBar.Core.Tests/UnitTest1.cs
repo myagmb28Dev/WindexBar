@@ -1,10 +1,8 @@
 using WindexBar.Core.Config;
 using WindexBar.Core.Models;
-using WindexBar.Core.Formatting;
 using WindexBar.Core.Providers;
 using WindexBar.Core.Providers.Codex;
 using WindexBar.Core.Refresh;
-using WindexBar.Core.Windowing;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -582,6 +580,36 @@ public sealed class MappingTests
 public sealed class ConfigTests
 {
     [Fact]
+    public void CorruptConfigFallsBackToDefaultsWithoutOverwritingTheOriginal()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, "{ definitely not json");
+
+        var config = new WindexBarConfigStore(path).LoadOrCreateDefault();
+
+        Assert.Equal(WindexBarConfig.DefaultLanguage, config.Language);
+        Assert.Equal("{ definitely not json", File.ReadAllText(path));
+    }
+
+    [Theory]
+    [InlineData("{\"providers\":null}")]
+    [InlineData("{\"providers\":[null]}")]
+    public void NullProviderCollectionsAndEntriesFallBackToCodexDefaults(string json)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(directory, "config.json");
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(path, json);
+
+        var config = new WindexBarConfigStore(path).LoadOrCreateDefault();
+
+        var provider = Assert.Single(config.Providers);
+        Assert.Equal("codex", provider.Id);
+        Assert.True(provider.Enabled);
+    }
+
+    [Fact]
     public void CreatesAndPersistsDefaultConfig()
     {
         var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
@@ -594,7 +622,6 @@ public sealed class ConfigTests
 
         Assert.True(File.Exists(path));
         Assert.False(reloaded.GetProviderConfig(UsageProvider.Codex).Enabled);
-        Assert.Equal(WindexBarConfig.DefaultRefreshIntervalSeconds, reloaded.GetProviderConfig(UsageProvider.Codex).RefreshIntervalSeconds);
         Assert.Equal(WindexBarConfig.DefaultLanguage, reloaded.Language);
         Assert.Equal(WindexBarConfig.DefaultToggleWindowHotkey, reloaded.Hotkeys.ToggleWindow);
         Assert.Equal(WindexBarConfig.DefaultToggleSidebarHotkey, reloaded.Hotkeys.ToggleSidebar);
@@ -644,17 +671,28 @@ public sealed class ConfigTests
     }
 
     [Fact]
-    public void PreservesSavedRefreshIntervalSeconds()
+    public void MigratesLegacyRefreshIntervalWithoutPersistingItAgain()
     {
-        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
+        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(directory, "config.json");
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(path, """
+        {
+          "version": 10,
+          "providers": [
+            { "id": "codex", "enabled": false, "refreshIntervalSeconds": 5 }
+          ]
+        }
+        """);
         var store = new WindexBarConfigStore(path);
         var config = store.LoadOrCreateDefault();
-        config.SetProviderConfig(new ProviderConfig { Id = "codex", RefreshIntervalSeconds = 5 });
         store.Save(config);
 
-        var reloaded = store.LoadOrCreateDefault();
+        var saved = File.ReadAllText(path);
 
-        Assert.Equal(5, reloaded.GetProviderConfig(UsageProvider.Codex).RefreshIntervalSeconds);
+        Assert.False(config.GetProviderConfig(UsageProvider.Codex).Enabled);
+        Assert.DoesNotContain("refreshIntervalSeconds", saved, StringComparison.Ordinal);
+        Assert.Contains($"\"version\": {WindexBarConfig.CurrentVersion}", saved, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -921,305 +959,6 @@ public sealed class ConfigTests
         var config = store.LoadOrCreateDefault();
 
         Assert.Equal(WindexBarConfig.DefaultToggleSidebarHotkey, config.Hotkeys.ToggleSidebar);
-    }
-}
-
-public sealed class HotkeyShortcutTests
-{
-    [Theory]
-    [InlineData("alt+o", "Alt+O")]
-    [InlineData("Ctrl + Shift + F12", "Ctrl+Shift+F12")]
-    [InlineData("win + space", "Win+Space")]
-    public void NormalizesShortcutText(string value, string expected)
-    {
-        var parsed = HotkeyShortcut.TryParse(value, out var shortcut);
-
-        Assert.True(parsed);
-        Assert.Equal(expected, shortcut!.DisplayText);
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("O")]
-    [InlineData("Alt")]
-    [InlineData("Alt+Ctrl")]
-    [InlineData("Alt+O+P")]
-    public void RejectsIncompleteOrAmbiguousShortcutText(string value)
-    {
-        Assert.False(HotkeyShortcut.TryParse(value, out _));
-    }
-}
-
-public sealed class TokenCountFormatterTests
-{
-    [Theory]
-    [InlineData(161_000, "ko", "16\uB9CC 1\uCC9C")]
-    [InlineData(258_400, "ko", "25\uB9CC 8\uCC9C")]
-    [InlineData(1_610_000, "ko", "161\uB9CC")]
-    [InlineData(161_000, "en", "161K")]
-    public void FormatsTokenCountsForLanguage(long tokens, string language, string expected)
-    {
-        Assert.Equal(expected, TokenCountFormatter.Format(tokens, language));
-    }
-}
-
-public sealed class CodexActivityWindowMatcherTests
-{
-    [Theory]
-    [InlineData("ChatGPT")]
-    [InlineData("ChatGPT.exe")]
-    public void MatchesChatGptDesktopProcess(string processName)
-    {
-        var window = new CodexActivityWindowSnapshot(processName, "ChatGPT", []);
-
-        Assert.True(CodexActivityWindowMatcher.IsCodexActivity(window));
-    }
-
-    [Fact]
-    public void MatchesCodexDesktopProcess()
-    {
-        var window = new CodexActivityWindowSnapshot("Codex", "Codex", []);
-
-        Assert.True(CodexActivityWindowMatcher.IsCodexActivity(window));
-    }
-
-    [Fact]
-    public void MatchesTerminalWithCodexDescendant()
-    {
-        var window = new CodexActivityWindowSnapshot("WindowsTerminal", "PowerShell", ["pwsh", "codex"]);
-
-        Assert.True(CodexActivityWindowMatcher.IsCodexActivity(window));
-    }
-
-    [Fact]
-    public void MatchesTerminalWhenCodexRunsOutsideWindowProcessTree()
-    {
-        var window = new CodexActivityWindowSnapshot("WindowsTerminal", "PowerShell", [], HasTerminalCodexProcess: true);
-
-        Assert.True(CodexActivityWindowMatcher.IsCodexActivity(window));
-    }
-
-    [Fact]
-    public void FindsCodexCliWithTerminalShellAncestor()
-    {
-        CodexActivityProcessSnapshot[] processes =
-        [
-            new(10, 1, "cmd.exe"),
-            new(11, 10, "node.exe"),
-            new(12, 11, "codex.exe")
-        ];
-
-        Assert.True(CodexActivityWindowMatcher.HasTerminalCodexProcess(processes));
-    }
-
-    [Fact]
-    public void IgnoresCodexProcessOwnedByDesktopApp()
-    {
-        CodexActivityProcessSnapshot[] processes =
-        [
-            new(20, 1, "ChatGPT.exe"),
-            new(21, 20, "codex.exe")
-        ];
-
-        Assert.False(CodexActivityWindowMatcher.HasTerminalCodexProcess(processes));
-    }
-
-    [Fact]
-    public void MatchesTerminalTitleFallback()
-    {
-        var window = new CodexActivityWindowSnapshot("pwsh", "codex app-server", []);
-
-        Assert.True(CodexActivityWindowMatcher.IsCodexActivity(window));
-    }
-
-    [Fact]
-    public void DoesNotMatchBrowserTitleFallback()
-    {
-        var window = new CodexActivityWindowSnapshot("chrome", "Codex docs", []);
-
-        Assert.False(CodexActivityWindowMatcher.IsCodexActivity(window));
-    }
-
-    [Fact]
-    public void DoesNotMatchChatGptBrowserTitleFallback()
-    {
-        var window = new CodexActivityWindowSnapshot("chrome", "ChatGPT", []);
-
-        Assert.False(CodexActivityWindowMatcher.IsCodexActivity(window));
-    }
-
-    [Theory]
-    [InlineData("WindexBar.Windows")]
-    [InlineData("WindexBar")]
-    public void IdentifiesOwnWindexBarWindow(string processName)
-    {
-        var window = new CodexActivityWindowSnapshot(processName, "WindexBar", []);
-
-        Assert.True(CodexActivityWindowMatcher.IsWindexBarWindow(window));
-        Assert.False(CodexActivityWindowMatcher.IsCodexActivity(window));
-    }
-}
-
-public sealed class AutoVisibilityPolicyTests
-{
-    [Theory]
-    [InlineData(false, true, false, false)]
-    [InlineData(true, false, false, false)]
-    [InlineData(true, true, true, false)]
-    [InlineData(true, true, false, true)]
-    public void OnlyShowsForEnabledCodexActivityWhenUserDidNotHide(bool enabled, bool codexActivity, bool userHidden, bool expected)
-    {
-        Assert.Equal(expected, AutoVisibilityPolicy.ShouldShow(enabled, codexActivity, userHidden));
-    }
-
-    [Theory]
-    [InlineData(true, true, false, true)]
-    [InlineData(false, true, false, false)]
-    [InlineData(true, false, false, false)]
-    [InlineData(true, true, true, false)]
-    public void PreservesOwnWindowFocusOnlyWhilePreviousCodexWindowRemainsAvailable(
-        bool hasPreviousCodexWindow,
-        bool previousCodexWindowVisible,
-        bool previousCodexWindowMinimized,
-        bool expected)
-    {
-        Assert.Equal(
-            expected,
-            AutoVisibilityPolicy.ShouldPreserveWhileOwnWindowFocused(
-                hasPreviousCodexWindow,
-                previousCodexWindowVisible,
-                previousCodexWindowMinimized));
-    }
-
-    [Fact]
-    public void KeepsWindowVisibleThroughOneTransientInactiveSample()
-    {
-        var filter = new AutoVisibilityStabilityFilter(inactiveSamplesBeforeHide: 2);
-
-        Assert.True(filter.ShouldTreatAsActive(true));
-        Assert.True(filter.ShouldTreatAsActive(false));
-        Assert.False(filter.ShouldTreatAsActive(false));
-    }
-
-    [Fact]
-    public void DoesNotTreatInitialInactiveStateAsActive()
-    {
-        var filter = new AutoVisibilityStabilityFilter(inactiveSamplesBeforeHide: 2);
-
-        Assert.False(filter.ShouldTreatAsActive(false));
-    }
-}
-
-public sealed class RateLimitResetCreditFormatterTests
-{
-    [Fact]
-    public void DirectSnapshotCapsDetailsToAuthoritativeAvailableCount()
-    {
-        var now = DateTimeOffset.Parse("2026-07-10T12:00:00+09:00");
-        var earlierExpiry = DateTimeOffset.Parse("2026-08-01T05:05:10+09:00");
-        var laterExpiry = DateTimeOffset.Parse("2026-08-03T06:06:00+09:00");
-        var snapshot = new RateLimitResetCreditsSnapshot(
-            1,
-            now,
-            [
-                new RateLimitResetCredit("later", now.AddDays(-7), laterExpiry, "codexRateLimits", "available", null, null),
-                new RateLimitResetCredit("earlier", now.AddDays(-8), earlierExpiry, "codexRateLimits", "available", null, null)
-            ]);
-
-        var credit = Assert.Single(snapshot.Credits);
-        Assert.Equal("earlier", credit.Id);
-        Assert.Equal(earlierExpiry, snapshot.NextExpiresAt);
-        var localExpiry = earlierExpiry.ToLocalTime().ToString("yy.M.dd H:mm", CultureInfo.InvariantCulture);
-        Assert.Equal($"Expires {localExpiry}: 1", RateLimitResetCreditFormatter.FormatDetail(snapshot, "en", now));
-    }
-
-    [Fact]
-    public void FormatsExactResetCreditExpirationsAndUnavailableCount()
-    {
-        var now = DateTimeOffset.Parse("2026-07-10T12:00:00+09:00");
-        var earliestExpiry = DateTimeOffset.Parse("2026-08-01T05:05:10+09:00");
-        var sameMinuteExpiry = DateTimeOffset.Parse("2026-08-01T05:05:47+09:00");
-        var laterExpiry = DateTimeOffset.Parse("2026-08-03T06:06:00+09:00");
-        var snapshot = new RateLimitResetCreditsSnapshot(
-            5,
-            now,
-            [
-                new RateLimitResetCredit("later", now.AddDays(-8), laterExpiry, "codexRateLimits", "available", null, null),
-                new RateLimitResetCredit("a", now.AddDays(-8), earliestExpiry, "codexRateLimits", "available", null, null),
-                new RateLimitResetCredit("missing", now.AddDays(-8), null, "codexRateLimits", "available", null, null),
-                new RateLimitResetCredit("b", now.AddDays(-8), sameMinuteExpiry, "codexRateLimits", "available", null, null)
-            ]);
-
-        Assert.Equal("5\uAC1C \uBCF4\uC720" + Environment.NewLine + "\uCCAB \uB9CC\uB8CC D-22", RateLimitResetCreditFormatter.FormatSummary(snapshot, "ko", now));
-        Assert.Equal("5 held" + Environment.NewLine + "First expiry D-22", RateLimitResetCreditFormatter.FormatSummary(snapshot, "en", now));
-        var earliestLocalExpiry = earliestExpiry.ToLocalTime().ToString("yy.M.dd H:mm", CultureInfo.InvariantCulture);
-        var laterLocalExpiry = laterExpiry.ToLocalTime().ToString("yy.M.dd H:mm", CultureInfo.InvariantCulture);
-
-        Assert.Equal(
-            $"{earliestLocalExpiry} \uB9CC\uB8CC: 2\uAC1C" + Environment.NewLine
-            + $"{laterLocalExpiry} \uB9CC\uB8CC: 1\uAC1C" + Environment.NewLine
-            + "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500" + Environment.NewLine
-            + "\uB9CC\uB8CC \uC815\uBCF4 \uBBF8\uC81C\uACF5: 2\uAC1C",
-            RateLimitResetCreditFormatter.FormatDetail(snapshot, "ko", now));
-        Assert.Equal(
-            $"Expires {earliestLocalExpiry}: 2" + Environment.NewLine
-            + $"Expires {laterLocalExpiry}: 1" + Environment.NewLine
-            + "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500" + Environment.NewLine
-            + "Expiration unavailable: 2",
-            RateLimitResetCreditFormatter.FormatDetail(snapshot, "en", now));
-    }
-
-    [Fact]
-    public void FormatsUnavailableWhenAllExactRowsOmitExpiration()
-    {
-        var now = DateTimeOffset.Parse("2026-07-10T12:00:00+09:00");
-        var snapshot = new RateLimitResetCreditsSnapshot(
-            2,
-            now,
-            [
-                new RateLimitResetCredit("a", now, null, "codexRateLimits", "available", null, null),
-                new RateLimitResetCredit("b", now, null, "codexRateLimits", "available", null, null)
-            ]);
-
-        Assert.Equal("2 held" + Environment.NewLine + "Expiration unavailable", RateLimitResetCreditFormatter.FormatSummary(snapshot, "en", now));
-        Assert.Equal("Expiration unavailable: 2", RateLimitResetCreditFormatter.FormatDetail(snapshot, "en", now));
-    }
-
-    [Fact]
-    public void FormatsUnavailableWhenAppServerReturnsCountOnly()
-    {
-        var snapshot = new RateLimitResetCreditsSnapshot(1, DateTimeOffset.UnixEpoch);
-
-        Assert.Equal("1\uAC1C \uBCF4\uC720" + Environment.NewLine + "\uB9CC\uB8CC \uC815\uBCF4 \uBBF8\uC81C\uACF5", RateLimitResetCreditFormatter.FormatSummary(snapshot, "ko", DateTimeOffset.UnixEpoch));
-        Assert.Equal("\uB9CC\uB8CC \uC815\uBCF4 \uBBF8\uC81C\uACF5: 1\uAC1C", RateLimitResetCreditFormatter.FormatDetail(snapshot, "ko", DateTimeOffset.UnixEpoch));
-    }
-}
-
-public sealed class WindowPlacementControllerTests
-{
-    [Fact]
-    public void FirstResizeUsesDefaultPositionThenPreservesCurrentPosition()
-    {
-        var controller = new WindowPlacementController(new WindowPosition(96, 96));
-
-        var initialPosition = controller.PositionForResize(new WindowPosition(320, 220));
-        var restoredPosition = controller.PositionForResize(new WindowPosition(320, 220));
-
-        Assert.Equal(new WindowPosition(96, 96), initialPosition);
-        Assert.Equal(new WindowPosition(320, 220), restoredPosition);
-    }
-
-    [Fact]
-    public void ActivationPlanPreservesCurrentBounds()
-    {
-        var plan = WindowActivationPlan.PreserveCurrentBounds;
-
-        Assert.True(plan.PreservesPosition);
-        Assert.True(plan.PreservesSize);
-        Assert.Equal(0, plan.X);
-        Assert.Equal(0, plan.Y);
-        Assert.Equal(0, plan.Width);
-        Assert.Equal(0, plan.Height);
     }
 }
 
@@ -1847,116 +1586,6 @@ public sealed class CodexSessionStateReaderTests
     };
 }
 
-public sealed class UsageStoreTests
-{
-    [Fact]
-    public async Task ManualRefreshUpdatesSnapshot()
-    {
-        var settings = TestSettings();
-        var descriptor = TestDescriptor(FetchResult(10, 55));
-        var store = new UsageStore(settings, descriptor);
-
-        await store.RefreshAsync(CancellationToken.None);
-
-        Assert.Null(store.LastError);
-        Assert.Equal(90, store.Snapshot!.Primary!.RemainingPercent);
-        Assert.Equal(55, store.Credits!.Remaining);
-    }
-
-    [Fact]
-    public async Task FailurePreservesStaleSnapshot()
-    {
-        var settings = TestSettings();
-        var descriptor = TestDescriptor(FetchResult(10, 0), new InvalidOperationException("boom"));
-        var store = new UsageStore(settings, descriptor);
-        await store.RefreshAsync(CancellationToken.None);
-        var stale = store.Snapshot;
-
-        await store.RefreshAsync(CancellationToken.None);
-
-        Assert.Same(stale, store.Snapshot);
-        Assert.Equal("boom", store.LastError);
-    }
-
-    [Fact]
-    public async Task DisabledProviderClearsState()
-    {
-        var settings = TestSettings();
-        settings.UpdateCodex(c => c.Enabled = false);
-        var store = new UsageStore(settings, CodexProviderDescriptor.Create(new QueueCodexRpcTransportFactory(Array.Empty<string[]>())));
-
-        await store.RefreshAsync(CancellationToken.None);
-
-        Assert.Null(store.Snapshot);
-        Assert.Null(store.LastError);
-    }
-
-    [Fact]
-    public async Task RefreshPreservesProviderResetCreditSnapshot()
-    {
-        var now = DateTimeOffset.Parse("2026-07-10T12:00:00+09:00");
-        var resetCredits = new RateLimitResetCreditsSnapshot(
-            1,
-            now,
-            [new RateLimitResetCredit("reset-1", now.AddDays(-8), now.AddDays(22), "codexRateLimits", "available", null, null)]);
-        var result = FetchResultWithResetCredits(resetCredits, now);
-        var expectedUsage = result.Usage;
-        var store = new UsageStore(TestSettings(), TestDescriptor(result));
-
-        await store.RefreshAsync(CancellationToken.None);
-
-        Assert.Same(expectedUsage, store.Snapshot);
-        Assert.Same(resetCredits, store.Snapshot!.RateLimitResetCredits);
-    }
-
-    private static SettingsStore TestSettings()
-    {
-        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
-        return new SettingsStore(new WindexBarConfigStore(path));
-    }
-
-    private static ProviderDescriptor TestDescriptor(params object[] outcomes) => new(
-        UsageProvider.Codex,
-        "Codex",
-        "Session",
-        "Weekly",
-        "codex",
-        true,
-        new ProviderFetchPipeline([new QueueProviderFetchStrategy(outcomes)]));
-
-    private static ProviderFetchResult FetchResult(double usedPercent, double creditsRemaining)
-    {
-        var now = DateTimeOffset.UnixEpoch;
-        var usage = new UsageSnapshot(
-            new RateWindow(usedPercent, 300, DateTimeOffset.FromUnixTimeSeconds(1_800_000_000), "in 1h"),
-            null,
-            null,
-            now,
-            new ProviderIdentitySnapshot(UsageProvider.Codex, "me@example.com", null, "plus"));
-        var credits = new CreditsSnapshot(creditsRemaining, Array.Empty<CreditEvent>(), now);
-        return new ProviderFetchResult(usage, credits, "test", "test", ProviderFetchKind.LocalProbe);
-    }
-
-    private static ProviderFetchResult FetchResultWithResetCredits(
-        RateLimitResetCreditsSnapshot resetCredits,
-        DateTimeOffset now)
-    {
-        var usage = new UsageSnapshot(
-            new RateWindow(10, 300, DateTimeOffset.FromUnixTimeSeconds(1_800_000_000), "in 1h"),
-            null,
-            null,
-            now,
-            new ProviderIdentitySnapshot(UsageProvider.Codex, "me@example.com", null, "plus"),
-            RateLimitResetCredits: resetCredits);
-        return new ProviderFetchResult(
-            usage,
-            new CreditsSnapshot(55, Array.Empty<CreditEvent>(), now),
-            "test",
-            "test",
-            ProviderFetchKind.LocalProbe);
-    }
-}
-
 public sealed class InstallerBuildScriptTests
 {
     [Fact]
@@ -2503,9 +2132,6 @@ internal sealed class QueueProviderFetchStrategy : IProviderFetchStrategy
     {
         _outcomes = new Queue<object>(outcomes);
     }
-
-    public string Id => "test";
-    public ProviderFetchKind Kind => ProviderFetchKind.LocalProbe;
 
     public Task<bool> IsAvailableAsync(ProviderFetchContext context, CancellationToken cancellationToken) => Task.FromResult(true);
 

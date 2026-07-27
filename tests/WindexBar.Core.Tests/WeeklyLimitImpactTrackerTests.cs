@@ -39,6 +39,29 @@ public sealed class WeeklyLimitImpactTrackerTests
     }
 
     [Fact]
+    public void AttributesWeeklyChangeWhenSessionTokensArriveAfterTheServerUpdate()
+    {
+        var store = new MemoryStateStore();
+        var tracker = new WeeklyLimitImpactTracker(store);
+        tracker.Apply(Snapshot(5, Session("a", 100_000, @"D:\Codes\ProjectA")));
+
+        var serverFirst = tracker.Apply(Snapshot(6, Session("a", 100_000, @"D:\Codes\ProjectA")));
+
+        Assert.Equal(0, Assert.Single(serverFirst.Sessions!).WeeklyLimitImpactPercent);
+        Assert.Equal(1, store.State.UnattributedImpact);
+
+        var sessionLater = new WeeklyLimitImpactTracker(store)
+            .Apply(Snapshot(6, Session("a", 121_000, @"D:\Codes\ProjectA")));
+
+        Assert.Equal(1, Assert.Single(sessionLater.Sessions!).WeeklyLimitImpactPercent);
+        Assert.Equal(0, store.State.UnattributedImpact);
+        Assert.Empty(store.State.PendingSessionTokens);
+
+        var view = SessionListViewModelFactory.Create(sessionLater.Sessions, true, "ko");
+        Assert.Contains("\uC8FC\uAC04 \uD55C\uB3C4 \uC601\uD5A5: -1%", view.Projects[0].Sessions[0].TokenDetails);
+    }
+
+    [Fact]
     public void DistributesObservedImpactByTokenGrowthWhenSeveralSessionsChangeTogether()
     {
         var tracker = new WeeklyLimitImpactTracker(new MemoryStateStore());
@@ -195,9 +218,8 @@ public sealed class WeeklyLimitImpactTrackerTests
         DateTimeOffset resetAt,
         params CodexSessionUsageSnapshot[] sessions) =>
         new(
-            new RateWindow(5, 300, resetAt.AddDays(-6), null),
-            new RateWindow(weeklyUsedPercent, 10_080, resetAt, null),
-            null,
+            new RateWindow(5, 300, resetAt.AddDays(-6)),
+            new RateWindow(weeklyUsedPercent, 10_080, resetAt),
             resetAt.AddDays(-1),
             null,
             Sessions: sessions);
@@ -207,12 +229,11 @@ public sealed class WeeklyLimitImpactTrackerTests
         string activeModel,
         params CodexSessionUsageSnapshot[] sessions)
     {
-        var accountWeekly = new RateWindow(weeklyUsedPercent, 10_080, ResetAt, null);
-        var modelWeekly = new RateWindow(weeklyUsedPercent, 10_080, ResetAt.AddMinutes(5), null);
+        var accountWeekly = new RateWindow(weeklyUsedPercent, 10_080, ResetAt);
+        var modelWeekly = new RateWindow(weeklyUsedPercent, 10_080, ResetAt.AddMinutes(5));
         return new UsageSnapshot(
-            new RateWindow(5, 300, ResetAt.AddDays(-6), null),
+            new RateWindow(5, 300, ResetAt.AddDays(-6)),
             accountWeekly,
-            null,
             ResetAt.AddDays(-1),
             null,
             Models: [new ModelUsageSnapshot(activeModel, null, modelWeekly)],
@@ -224,15 +245,14 @@ public sealed class WeeklyLimitImpactTrackerTests
         double weeklyUsedPercent,
         params CodexSessionUsageSnapshot[] sessions) =>
         new(
-            new RateWindow(5, 300, ResetAt.AddDays(-6), null),
-            null,
+            new RateWindow(5, 300, ResetAt.AddDays(-6)),
             null,
             ResetAt.AddDays(-1),
             null,
             Models: [new ModelUsageSnapshot(
                 "Codex",
                 null,
-                new RateWindow(weeklyUsedPercent, 10_080, ResetAt, null))],
+                new RateWindow(weeklyUsedPercent, 10_080, ResetAt))],
             ActiveModel: new CodexModelSelection("Codex", null, null, "Codex", ResetAt.AddDays(-1)),
             Sessions: sessions);
 

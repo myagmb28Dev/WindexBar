@@ -19,7 +19,7 @@
 - Background Codex CLI compatibility checks with a 24-hour latest-version cache, automatic updates, an in-app progress gauge, post-update version verification, and an optional manual check button.
 - Automatic Codex CLI updates through auto-detected or selected PowerShell, npm, Bun, Homebrew, WinGet, or custom commands.
 - WindexBar update checks on every launch and every 15 minutes while running, with a pinned RSA-signed manifest, SHA-256 verification, an update-now-or-later prompt, silent installation, and automatic restart after approval.
-- The current WindexBar release version is shown in the title bar.
+- The title bar keeps the product name uncluttered as `WindexBar`, while the home card shows the current release version.
 - Live updates for Codex-generated and manually edited session names, with project-free conversations shown under `No project`.
 - Banked rate-limit reset credit count with exact expiration details from Codex app-server when provided.
 - Reset-credit details grouped by exact expiration time, with unavailable expirations shown explicitly.

@@ -1,13 +1,13 @@
 <Project>
   <PropertyGroup>
-    <Version Condition="'$(Version)' == ''">2.2.0</Version>
+    <Version Condition="'$(Version)' == ''">2.2.1</Version>
     <LangVersion>14.0</LangVersion>
     <CodePage>65001</CodePage>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <BaseOutputPath>$(TEMP)\WindexBar\$(MSBuildProjectName)\bin\</BaseOutputPath>
-    <BaseIntermediateOutputPath>$(TEMP)\WindexBar\$(MSBuildProjectName)\obj\</BaseIntermediateOutputPath>
+    <BaseOutputPath>$(MSBuildThisFileDirectory)artifacts\build\$(MSBuildProjectName)\bin\</BaseOutputPath>
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)artifacts\build\$(MSBuildProjectName)\obj\</BaseIntermediateOutputPath>
     <DefaultItemExcludes>$(DefaultItemExcludes);$(MSBuildProjectDirectory)\obj\**;$(MSBuildProjectDirectory)\bin\**</DefaultItemExcludes>
   </PropertyGroup>
 </Project>

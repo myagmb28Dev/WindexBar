@@ -14,10 +14,7 @@ public sealed class CodexRpcTimeoutException : TimeoutException
 {
     public CodexRpcTimeoutException(string method) : base($"Codex RPC timed out waiting for `{method}` reply.")
     {
-        Method = method;
     }
-
-    public string Method { get; }
 }
 
 public sealed class CodexRpcClient : IAsyncDisposable
