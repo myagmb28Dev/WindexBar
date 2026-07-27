@@ -1,5 +1,6 @@
 # WindexBar
-<img width="371" height="447" alt="image" src="https://github.com/user-attachments/assets/5c5f1f17-3144-4317-810a-d38a610dbe66" />
+<img width="406" height="386" alt="image" src="https://github.com/user-attachments/assets/00e38c67-8b84-4b37-b483-fe32d177adca" />
+
 
 
 
