@@ -40,8 +40,13 @@ public sealed class SettingsStore
 
     public void Save()
     {
-        _store.Save(Config);
+        Persist();
         OnChanged();
+    }
+
+    public void Persist()
+    {
+        _store.Save(Config);
     }
 
     private void OnChanged() => Changed?.Invoke(this, EventArgs.Empty);

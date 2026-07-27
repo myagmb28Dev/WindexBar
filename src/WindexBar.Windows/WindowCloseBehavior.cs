@@ -45,6 +45,16 @@ internal static class WindowCloseBehavior
         return Describe(handle, showResult, positionResult, restoreResult: false, foregroundResult: false);
     }
 
+    public static void ActivateForInput(Window window)
+    {
+        window.Activate();
+        var handle = WindowNative.GetWindowHandle(window);
+        if (handle != IntPtr.Zero)
+        {
+            _ = SetForegroundWindow(handle);
+        }
+    }
+
     public static void Hide(Window window)
     {
         var handle = WindowNative.GetWindowHandle(window);

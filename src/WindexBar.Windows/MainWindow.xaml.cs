@@ -13,33 +13,49 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.Graphics;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.System;
 using Windows.UI.Core;
+using System.Runtime.InteropServices;
+using static WindexBar.Windows.Views.FeatureViewHelpers;
 using WinUiDispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue;
 
 namespace WindexBar.Windows;
 
 public sealed partial class MainWindow : Window
 {
-    private const double HudClientWidth = 265;
-    private const double ContentClientHeight = 334;
-    private const double SettingsClientWidth = HudClientWidth;
-    private const double KeyboardScrollStep = 36;
-    private const double SideBarCollapsedWidth = 6;
-    private const double SideBarExpandedWidth = 34;
-    private const double SideBarExpandedGap = 7;
-    private const double SideBarOuterWidth = SideBarExpandedWidth + SideBarExpandedGap;
-    private const double SideBarVisualWidth = SideBarOuterWidth + 10;
+    private const double TitleBarClientHeight = 34;
+    private const double SideBarVisualWidth = 51;
+    private const double SideBarInternalHoverWidth = 18;
+    private const double SideBarBottomMargin = 10;
+    private const int SideBarHoverHideDelayMilliseconds = 500;
+    private const double ModeLockNoticeWidth = 220;
+    private const int ModeLockNoticeDurationMilliseconds = 1800;
     private const double SideBarButtonHeight = 32;
     private const double SideBarButtonSpacing = 7;
     private const int SideBarButtonCount = 6;
     private const double SideBarNaturalHeight =
         (SideBarButtonHeight * SideBarButtonCount) + (SideBarButtonSpacing * (SideBarButtonCount - 1));
+    private const double HudClientWidth = 265;
+    private const double ContentClientHeight = 334;
+    private const double SettingsClientWidth = HudClientWidth;
+    private const double KeyboardScrollStep = 36;
     private const string FastIndicatorGlyph = "\u26A1";
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        public int X;
+        public int Y;
+    }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetCursorPos(out NativePoint point);
 
     private readonly UsageStore _usageStore;
     private readonly SettingsStore _settingsStore;
@@ -52,14 +68,22 @@ public sealed partial class MainWindow : Window
     private readonly SettingsController _settingsController;
     private readonly CodexUpdateController _codexUpdateController;
     private bool _isFastServiceTier;
-    private bool _isSideBarOpen = true;
+    private DispatcherTimer? _sideBarHoverHideTimer;
+    private DispatcherTimer? _sideBarHoverPollTimer;
+    private DispatcherTimer? _modeLockNoticeHideTimer;
+    private bool _isSideBarPinned;
+    private bool _isSideBarHoverVisible;
+    private bool _isPointerOverSideBarHoverRegion;
+    private bool _hasAppliedInitialWindowSize;
     private bool _projectSessionsFirst = true;
     private bool _codexVersionCheckStarted;
     private Grid TitleBarDragRegion = null!;
     private Grid ContentRootGrid = null!;
-    private Grid SideBarHost = null!;
-    private ColumnDefinition SideBarColumn = null!;
     private Grid SideBarPanel = null!;
+    private Popup SideBarPopup = null!;
+    private Popup ModeLockNoticePopup = null!;
+    private TextBlock ModeLockNoticeTitleText = null!;
+    private TextBlock ModeLockNoticeMessageText = null!;
     private HudViewControl HudView = null!;
     private SessionsViewControl SessionsView = null!;
     private CreditsViewControl CreditsView = null!;
@@ -137,15 +161,23 @@ public sealed partial class MainWindow : Window
         ConfigureCompactWindow();
         AppWindow.Changed += OnAppWindowChanged;
         RootLayout.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(OnScrollNavigationKeyDown), true);
-        RootLayout.PointerPressed += (_, _) =>
+        RootLayout.PointerPressed += (_, args) =>
         {
-            RootLayout.Focus(FocusState.Pointer);
+            if (!IsArrowKeyInputControl(args.OriginalSource as DependencyObject))
+            {
+                RootLayout.Focus(FocusState.Pointer);
+            }
         };
 
         RootLayout.Loaded += async (_, _) =>
         {
             RootLayout.Focus(FocusState.Programmatic);
-            ResizeForCurrentView();
+            if (!TryRestoreWindowSize())
+            {
+                ResizeForCurrentView();
+            }
+
+            _hasAppliedInitialWindowSize = true;
             if (!_codexVersionCheckStarted)
             {
                 _codexVersionCheckStarted = true;
@@ -169,6 +201,10 @@ public sealed partial class MainWindow : Window
             _lifetimeCancellation.Cancel();
             _lifetimeCancellation.Dispose();
             _gaugeAnimator.Dispose();
+            _sideBarHoverHideTimer?.Stop();
+            _sideBarHoverPollTimer?.Stop();
+            _modeLockNoticeHideTimer?.Stop();
+            ModeLockNoticePopup.IsOpen = false;
             foreach (var timer in _scrollBarHideTimers)
             {
                 timer.Stop();
@@ -184,7 +220,7 @@ public sealed partial class MainWindow : Window
     {
         RootLayout.Background = Brush(0xFF, 0x25, 0x25, 0x27);
         RootLayout.RowDefinitions.Clear();
-        RootLayout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(34) });
+        RootLayout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(TitleBarClientHeight) });
         RootLayout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
         var customTitleBar = new Grid { Background = Brush(0, 0, 0, 0) };
@@ -223,20 +259,14 @@ public sealed partial class MainWindow : Window
         windowButtons.Children.Add(CreateTitleButton(Brush(0xFF, 0xFF, 0xBD, 0x2E), MinimizeCircleButton_Click));
         windowButtons.Children.Add(CreateTitleButton(Brush(0xFF, 0x28, 0xC8, 0x40), ZoomCircleButton_Click));
 
-        ContentRootGrid = new Grid { Padding = new Thickness(10, 0, 10, 10), ColumnSpacing = 0 };
-        SideBarColumn = new ColumnDefinition { Width = new GridLength(SideBarCollapsedWidth) };
-        ContentRootGrid.ColumnDefinitions.Add(SideBarColumn);
-        ContentRootGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        ContentRootGrid = new Grid { Padding = new Thickness(10, 0, 10, 10) };
         Grid.SetRow(ContentRootGrid, 1);
         RootLayout.Children.Add(ContentRootGrid);
 
-        SideBarHost = new Grid
-        {
-            Width = SideBarVisualWidth,
-            HorizontalAlignment = HorizontalAlignment.Left,
-            Background = Brush(1, 0, 0, 0)
-        };
-        Grid.SetRow(SideBarHost, 1);
+        _sideBarHoverHideTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(SideBarHoverHideDelayMilliseconds) };
+        _sideBarHoverHideTimer.Tick += SideBarHoverHideTimer_Tick;
+        _sideBarHoverPollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(80) };
+        _sideBarHoverPollTimer.Tick += (_, _) => PollSideBarHoverRegion();
 
         SideBarPanel = new Grid
         {
@@ -244,7 +274,8 @@ public sealed partial class MainWindow : Window
             VerticalAlignment = VerticalAlignment.Top,
             HorizontalAlignment = HorizontalAlignment.Left,
             Width = SideBarVisualWidth,
-            Opacity = 0.72
+            Height = SideBarNaturalHeight,
+            Opacity = 0.7
         };
         for (var row = 0; row < SideBarButtonCount; row++)
         {
@@ -253,13 +284,53 @@ public sealed partial class MainWindow : Window
                 Height = new GridLength(1, GridUnitType.Star)
             });
         }
-
-        SideBarHost.SizeChanged += (_, args) =>
+        SideBarPopup = new Popup
         {
-            var availableHeight = Math.Max(0, args.NewSize.Height - SideBarButtonSpacing);
-            SideBarPanel.Height = Math.Min(SideBarNaturalHeight, availableHeight);
+            Child = SideBarPanel,
+            HorizontalOffset = -SideBarVisualWidth,
+            VerticalOffset = TitleBarClientHeight,
+            ShouldConstrainToRootBounds = false
         };
-        SideBarHost.Children.Add(SideBarPanel);
+
+        ModeLockNoticeTitleText = new TextBlock
+        {
+            FontSize = 13,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap
+        };
+        ModeLockNoticeMessageText = new TextBlock
+        {
+            FontSize = 11,
+            Opacity = 0.82,
+            TextWrapping = TextWrapping.Wrap
+        };
+        var modeLockNoticePanel = new StackPanel { Spacing = 5 };
+        modeLockNoticePanel.Children.Add(ModeLockNoticeTitleText);
+        modeLockNoticePanel.Children.Add(ModeLockNoticeMessageText);
+        ModeLockNoticePopup = new Popup
+        {
+            Child = new Border
+            {
+                Width = ModeLockNoticeWidth,
+                IsHitTestVisible = false,
+                Padding = new Thickness(10, 8, 10, 9),
+                Background = Brush(0xD9, 0x2A, 0x27, 0x31),
+                BorderBrush = Brush(0xB3, 0x9A, 0x7C, 0xDE),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(9),
+                Child = modeLockNoticePanel
+            },
+            IsLightDismissEnabled = false
+        };
+        _modeLockNoticeHideTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(ModeLockNoticeDurationMilliseconds)
+        };
+        _modeLockNoticeHideTimer.Tick += (_, _) =>
+        {
+            _modeLockNoticeHideTimer.Stop();
+            ModeLockNoticePopup.IsOpen = false;
+        };
 
         HomeButton = CreateSideBarButton("\u2302");
         HomeButton.Click += HomeButton_Click;
@@ -294,7 +365,6 @@ public sealed partial class MainWindow : Window
 
         HudView = new HudViewControl(CreateQuitButton());
         AttachTransientScrollBar(HudView.ScrollViewer);
-        Grid.SetColumn(HudView, 1);
         ContentRootGrid.Children.Add(HudView);
 
         SessionsView = new SessionsViewControl(CreateQuitButton())
@@ -305,7 +375,6 @@ public sealed partial class MainWindow : Window
         SessionsView.SortPreferenceChanged += (_, projectFirst) => ApplySessionSortPreference(projectFirst);
         SessionsView.SessionDetailsRequested += (_, args) => ShowSessionDetailsWindow(args);
         AttachTransientScrollBar(SessionsView.ScrollViewer);
-        Grid.SetColumn(SessionsView, 1);
         ContentRootGrid.Children.Add(SessionsView);
 
         CreditsView = new CreditsViewControl(CreateQuitButton()) { Visibility = Visibility.Collapsed };
@@ -313,7 +382,6 @@ public sealed partial class MainWindow : Window
         AttachTransientScrollBar(CreditsView.ScrollViewer);
         CreditsTitleText = CreditsView.TitleText;
         CreditsDetailText = CreditsView.DetailText;
-        Grid.SetColumn(CreditsView, 1);
         ContentRootGrid.Children.Add(CreditsView);
 
         SettingsView = new SettingsViewControl(CreateQuitButton()) { Visibility = Visibility.Collapsed };
@@ -327,7 +395,6 @@ public sealed partial class MainWindow : Window
         };
         SettingsView.UpdateDetailsCloseButton.Click += (_, _) => _codexUpdateDetailsWindow?.Close();
         AttachTransientScrollBar(SettingsView.ScrollViewer);
-        Grid.SetColumn(SettingsView, 1);
         ContentRootGrid.Children.Add(SettingsView);
 
         StyleView = new StyleViewControl(CreateQuitButton()) { Visibility = Visibility.Collapsed };
@@ -338,7 +405,6 @@ public sealed partial class MainWindow : Window
         StyleView.SaveButton.Click += SaveStyleButton_Click;
         AttachTransientScrollBar(StyleView.ScrollViewer);
         BindStyleControls();
-        Grid.SetColumn(StyleView, 1);
         ContentRootGrid.Children.Add(StyleView);
 
         ResetCreditDetailsView = new ResetCreditDetailsViewControl(CreateQuitButton()) { Visibility = Visibility.Collapsed };
@@ -348,10 +414,9 @@ public sealed partial class MainWindow : Window
         ResetCreditDetailsTitleText = ResetCreditDetailsView.TitleText;
         ResetCreditSummaryText = ResetCreditDetailsView.SummaryText;
         ResetCreditDetailsText = ResetCreditDetailsView.DetailText;
-        Grid.SetColumn(ResetCreditDetailsView, 1);
         ContentRootGrid.Children.Add(ResetCreditDetailsView);
-        RootLayout.Children.Add(SideBarHost);
-        ApplySideBarProgress();
+        RootLayout.SizeChanged += RootLayout_SizeChanged;
+        ApplySideBarLayout();
     }
 
 
@@ -545,6 +610,7 @@ public sealed partial class MainWindow : Window
 
     private void AttachTransientScrollBar(ScrollViewer scrollViewer)
     {
+        scrollViewer.IsTabStop = true;
         var hideTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(650) };
         _scrollBarHideTimers.Add(hideTimer);
 
@@ -738,37 +804,168 @@ public sealed partial class MainWindow : Window
         ResizeClientToEffectiveSize(HudClientWidth, ContentClientHeight);
     }
 
+    private bool TryRestoreWindowSize()
+    {
+        var window = _settingsStore.Config.Window;
+        if (window.ClientWidth is not { } width || window.ClientHeight is not { } height)
+        {
+            return false;
+        }
+
+        ResizeClientToEffectiveSize(width, height);
+        return true;
+    }
+
     private void ResizeClientToEffectiveSize(double width, double height)
     {
         var scale = RootLayout.XamlRoot?.RasterizationScale ?? 1;
+        var clientWidth = (int)Math.Ceiling(width * scale);
+        var clientHeight = (int)Math.Ceiling(height * scale);
         var position = _windowPlacement.PositionForResize(new WindowPosition(AppWindow.Position.X, AppWindow.Position.Y));
-        var sideBarWidth = _isSideBarOpen ? SideBarOuterWidth : SideBarCollapsedWidth;
-        AppWindow.ResizeClient(new SizeInt32(
-            (int)Math.Ceiling((width + sideBarWidth - SideBarCollapsedWidth) * scale),
-            (int)Math.Ceiling(height * scale)));
+        AppWindow.ResizeClient(new SizeInt32(clientWidth, clientHeight));
         AppWindow.Move(new PointInt32(position.X, position.Y));
     }
 
 
-    private void ApplySideBarProgress()
-    {
-        ApplySideBarLayout();
-    }
-
     private void ApplySideBarLayout()
     {
-        SideBarColumn.Width = new GridLength(_isSideBarOpen ? SideBarExpandedWidth : SideBarCollapsedWidth);
-        SideBarHost.Width = _isSideBarOpen ? SideBarVisualWidth : SideBarCollapsedWidth;
-        ContentRootGrid.ColumnSpacing = _isSideBarOpen ? SideBarExpandedGap : 0;
-        SideBarPanel.Opacity = _isSideBarOpen ? 0.72 : 0;
-        SideBarPanel.IsHitTestVisible = _isSideBarOpen;
+        var isVisible = IsSideBarVisible;
+        UpdateSideBarHeight();
+        if (SideBarPopup.XamlRoot is null && RootLayout.XamlRoot is not null)
+        {
+            SideBarPopup.XamlRoot = RootLayout.XamlRoot;
+        }
+
+        var isWindowVisible = WindowCloseBehavior.IsVisible(this);
+        var shouldOpenSideBar = isVisible && isWindowVisible;
+        if (SideBarPopup.IsOpen != shouldOpenSideBar)
+        {
+            SideBarPopup.IsOpen = shouldOpenSideBar;
+        }
+
+        if (IsSideBarHoverRevealEnabled && isWindowVisible)
+        {
+            _sideBarHoverPollTimer?.Start();
+        }
+        else
+        {
+            _sideBarHoverPollTimer?.Stop();
+            _isPointerOverSideBarHoverRegion = false;
+        }
+    }
+
+    private void UpdateSideBarHeight()
+    {
+        var availableHeight = Math.Max(0, RootLayout.ActualHeight - TitleBarClientHeight - SideBarBottomMargin);
+        var sideBarHeight = Math.Min(SideBarNaturalHeight, availableHeight);
+        SideBarPanel.Height = sideBarHeight;
+    }
+
+    private void RootLayout_SizeChanged(object sender, SizeChangedEventArgs args)
+    {
+        UpdateSideBarHeight();
+        if (!_hasAppliedInitialWindowSize)
+        {
+            return;
+        }
+
+        _settingsStore.Config.Window.ClientWidth = Math.Round(args.NewSize.Width, 2);
+        _settingsStore.Config.Window.ClientHeight = Math.Round(args.NewSize.Height, 2);
     }
 
     public void ToggleSideBar()
     {
-        _isSideBarOpen = !_isSideBarOpen;
+        if (IsSideBarHoverRevealEnabled)
+        {
+            ShowModeLockedNotice(
+                Text("Sidebar toggle locked", "사이드바 토글 잠김"),
+                Text(
+                    "Sidebar hover reveal is enabled. Move the pointer to the sidebar edge to use it.",
+                    "사이드바 호버 표시가 켜져 있어요. 사이드바 가장자리에 마우스를 올려 사용해 주세요."));
+            return;
+        }
+
+        _isSideBarPinned = !_isSideBarPinned;
+        _isSideBarHoverVisible = false;
+        _sideBarHoverHideTimer?.Stop();
         ApplySideBarLayout();
-        ResizeForCurrentView();
+    }
+
+    private bool IsSideBarHoverRevealEnabled => _settingsStore.Config.Sidebar.ShowOnHover;
+
+    private bool IsSideBarVisible => _isSideBarPinned || _isSideBarHoverVisible;
+
+    private void PollSideBarHoverRegion()
+    {
+        if (!IsSideBarHoverRevealEnabled || !WindowCloseBehavior.IsVisible(this))
+        {
+            _sideBarHoverPollTimer?.Stop();
+            _isPointerOverSideBarHoverRegion = false;
+            return;
+        }
+
+        if (!GetCursorPos(out var cursor))
+        {
+            return;
+        }
+
+        var scale = RootLayout.XamlRoot?.RasterizationScale ?? 1;
+        var externalWidth = (int)Math.Ceiling(SideBarVisualWidth * scale);
+        var internalWidth = (int)Math.Ceiling(SideBarInternalHoverWidth * scale);
+        var sideBarHeight = (int)Math.Ceiling(SideBarPanel.Height * scale);
+        var clientHeight = (int)Math.Ceiling(RootLayout.ActualHeight * scale);
+        var windowLeft = AppWindow.Position.X;
+        var left = windowLeft - externalWidth;
+        var top = AppWindow.Position.Y + (int)Math.Ceiling(TitleBarClientHeight * scale);
+        var isOverExternalRegion = cursor.X >= left
+            && cursor.X < windowLeft
+            && cursor.Y >= top
+            && cursor.Y < top + sideBarHeight;
+        var isOverInternalRegion = cursor.X >= windowLeft
+            && cursor.X < windowLeft + internalWidth
+            && cursor.Y >= top
+            && cursor.Y < AppWindow.Position.Y + clientHeight;
+        var isOverHoverRegion = isOverExternalRegion || isOverInternalRegion;
+
+        if (_isPointerOverSideBarHoverRegion == isOverHoverRegion)
+        {
+            return;
+        }
+
+        _isPointerOverSideBarHoverRegion = isOverHoverRegion;
+        if (isOverHoverRegion)
+        {
+            _sideBarHoverHideTimer?.Stop();
+            if (!_isSideBarPinned && !_isSideBarHoverVisible)
+            {
+                _isSideBarHoverVisible = true;
+                ApplySideBarLayout();
+            }
+
+            return;
+        }
+
+        StartSideBarHoverHideTimer();
+    }
+
+    private void StartSideBarHoverHideTimer()
+    {
+        if (!_isSideBarPinned && IsSideBarHoverRevealEnabled)
+        {
+            _sideBarHoverHideTimer?.Start();
+        }
+    }
+
+    private void SideBarHoverHideTimer_Tick(object? sender, object args)
+    {
+        _sideBarHoverHideTimer?.Stop();
+        if (_isSideBarPinned || _isPointerOverSideBarHoverRegion || !IsSideBarHoverRevealEnabled || !_isSideBarHoverVisible)
+        {
+            return;
+        }
+
+        _isSideBarHoverVisible = false;
+        ApplySideBarLayout();
     }
 
     private void OnUsageChanged(object? sender, EventArgs args)
@@ -781,8 +978,27 @@ public sealed partial class MainWindow : Window
         _dispatcher.TryEnqueue(() =>
         {
             ApplyLanguage();
+            ApplySideBarHoverPreference();
             UpdateState();
         });
+    }
+
+    private void ApplySideBarHoverPreference()
+    {
+        if (IsSideBarHoverRevealEnabled)
+        {
+            _isSideBarPinned = false;
+            _isSideBarHoverVisible = _isPointerOverSideBarHoverRegion;
+            _sideBarHoverHideTimer?.Stop();
+            ApplySideBarLayout();
+            return;
+        }
+
+        _sideBarHoverHideTimer?.Stop();
+        _sideBarHoverPollTimer?.Stop();
+        _isSideBarHoverVisible = false;
+        _isPointerOverSideBarHoverRegion = false;
+        ApplySideBarLayout();
     }
 
     private void OnScrollNavigationKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
@@ -888,7 +1104,7 @@ public sealed partial class MainWindow : Window
     {
         for (var current = source; current is not null; current = VisualTreeHelper.GetParent(current))
         {
-            if (current is TextBox or PasswordBox or RichEditBox or ComboBox or Slider or NumberBox)
+            if (current is TextBox or PasswordBox or RichEditBox or ComboBox or Slider or NumberBox or ButtonBase)
             {
                 return true;
             }
@@ -927,17 +1143,17 @@ public sealed partial class MainWindow : Window
         presenter.Maximize();
     }
 
-    private void HomeButton_Click(object sender, RoutedEventArgs args) => ShowHudView();
+    private void HomeButton_Click(object sender, RoutedEventArgs args) => NavigateFromSideBar(ShowHudView);
 
     private void SessionsButton_Click(object sender, RoutedEventArgs args)
     {
         if (SessionsView.Visibility == Visibility.Visible)
         {
-            ShowHudView();
+            NavigateFromSideBar(ShowHudView);
             return;
         }
 
-        ShowSessionsView();
+        NavigateFromSideBar(ShowSessionsView);
     }
 
     private void TitleText_PointerPressed(object sender, PointerRoutedEventArgs args)
@@ -950,31 +1166,44 @@ public sealed partial class MainWindow : Window
     {
         if (CreditsView.Visibility == Visibility.Visible)
         {
-            ShowHudView();
+            NavigateFromSideBar(ShowHudView);
             return;
         }
 
-        ShowCreditsView();
+        NavigateFromSideBar(ShowCreditsView);
     }
 
     private void SettingsButton_Click(object sender, RoutedEventArgs args)
     {
         if (SettingsView.Visibility == Visibility.Visible)
         {
-            ShowHudView();
+            NavigateFromSideBar(ShowHudView);
             return;
         }
 
-        ShowSettingsView();
+        NavigateFromSideBar(ShowSettingsView);
     }
 
     private void OnAppWindowChanged(AppWindow sender, AppWindowChangedEventArgs args)
     {
-        if (args.DidVisibilityChange && !sender.IsVisible)
+        if (!args.DidVisibilityChange)
         {
+            return;
+        }
+
+        if (!sender.IsVisible)
+        {
+            _sideBarHoverHideTimer?.Stop();
+            _sideBarHoverPollTimer?.Stop();
+            _isPointerOverSideBarHoverRegion = false;
+            _isSideBarHoverVisible = false;
+            ApplySideBarLayout();
             CloseGaugeColorWindow();
             CloseAuxiliaryWindows();
+            return;
         }
+
+        ApplySideBarLayout();
     }
 
     private void CloseAuxiliaryWindows()
@@ -1002,6 +1231,33 @@ public sealed partial class MainWindow : Window
             OwnedPopupWindow.DetachContent(updateDetails);
             updateDetails.Close();
         }
+
+        _modeLockNoticeHideTimer?.Stop();
+        ModeLockNoticePopup.IsOpen = false;
+    }
+
+    internal void ShowModeLockedNotice(string title, string message)
+    {
+        if (ModeLockNoticePopup.XamlRoot is null && RootLayout.XamlRoot is not null)
+        {
+            ModeLockNoticePopup.XamlRoot = RootLayout.XamlRoot;
+        }
+
+        if (ModeLockNoticePopup.XamlRoot is null)
+        {
+            return;
+        }
+
+        ModeLockNoticeTitleText.Text = title;
+        ModeLockNoticeMessageText.Text = message;
+        ModeLockNoticePopup.HorizontalOffset = Math.Max(
+            12,
+            Math.Round((RootLayout.ActualWidth - ModeLockNoticeWidth) / 2));
+        ModeLockNoticePopup.VerticalOffset = TitleBarClientHeight + 12;
+        ModeLockNoticePopup.IsOpen = true;
+        _modeLockNoticeHideTimer?.Stop();
+        _modeLockNoticeHideTimer?.Start();
+
     }
 
     internal Task<bool> PromptForAppUpdateAsync(AppVersion version, CancellationToken cancellationToken)
@@ -1476,22 +1732,38 @@ public sealed partial class MainWindow : Window
     {
         if (StyleView.Visibility == Visibility.Visible)
         {
-            ShowHudView();
+            NavigateFromSideBar(ShowHudView);
             return;
         }
 
-        ShowStyleView();
+        NavigateFromSideBar(ShowStyleView);
     }
 
     private void ResetCreditDetailsButton_Click(object sender, RoutedEventArgs args)
     {
         if (ResetCreditDetailsView.Visibility == Visibility.Visible)
         {
-            ShowHudView();
+            NavigateFromSideBar(ShowHudView);
             return;
         }
 
-        ShowResetCreditDetailsView();
+        NavigateFromSideBar(ShowResetCreditDetailsView);
+    }
+
+    private void NavigateFromSideBar(Action showView)
+    {
+        showView();
+        _dispatcher.TryEnqueue(() =>
+        {
+            WindowCloseBehavior.ActivateForInput(this);
+            var scrollViewer = VisibleScrollViewer();
+            if (scrollViewer is null)
+            {
+                return;
+            }
+
+            _ = scrollViewer.Focus(FocusState.Programmatic);
+        });
     }
 
 
@@ -1808,7 +2080,23 @@ public sealed partial class MainWindow : Window
         GaugeColorLabelText.Text = Text("Gauge color", "\uAC8C\uC774\uC9C0 \uC0C9\uC0C1");
         GaugeAnimationLabelText.Text = Text("Animation", "\uC560\uB2C8\uBA54\uC774\uC158");
         _settingsController.ApplyLanguage(Text);
+        ApplyStyleTooltips();
         UpdateSessionSortToggleAppearance();
+    }
+
+    private void ApplyStyleTooltips()
+    {
+        SetToolTip(Text("Return to the usage overview.", "사용량 화면으로 돌아가요."), StyleTitleText);
+        SetToolTip(Text(
+            "Choose how thin or thick the gauge rings appear.",
+            "게이지 링의 두께를 선택해요."), GaugeThicknessLabelText, GaugeThicknessComboBox);
+        SetToolTip(Text(
+            "Choose the fill color used by the gauges.",
+            "게이지에 사용할 채우기 색상을 선택해요."), GaugeColorLabelText, GaugeColorButton);
+        SetToolTip(Text(
+            "Choose how the gauge fill animation behaves.",
+            "게이지 채우기 애니메이션 방식을 선택해요."), GaugeAnimationLabelText, GaugeAnimationComboBox);
+        SetToolTip(Text("Save the current style settings.", "현재 스타일 설정을 저장해요."), SaveStyleButton);
     }
 
     private string CurrentLanguage => WindexBarConfig.NormalizeLanguage(_settingsStore.Config.Language);

@@ -20,7 +20,7 @@ internal sealed class SettingsViewControl : UserControl
         root.Children.Add(ScrollViewer);
 
         var grid = new Grid { RowSpacing = 9 };
-        for (var row = 0; row < 9; row++)
+        for (var row = 0; row < 11; row++)
         {
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         }
@@ -84,7 +84,15 @@ internal sealed class SettingsViewControl : UserControl
         Grid.SetRow(AutoShowWithCodexCheckBox, 7);
         grid.Children.Add(AutoShowWithCodexCheckBox);
 
-        var versionGrid = CreateTwoColumnRow(grid, 8, GridLength.Auto);
+        RateLimitAlertsCheckBox = new CheckBox { Content = "Alert at 80% and 90% usage" };
+        Grid.SetRow(RateLimitAlertsCheckBox, 8);
+        grid.Children.Add(RateLimitAlertsCheckBox);
+
+        SidebarHoverRevealCheckBox = new CheckBox { Content = "Show sidebar on hover" };
+        Grid.SetRow(SidebarHoverRevealCheckBox, 9);
+        grid.Children.Add(SidebarHoverRevealCheckBox);
+
+        var versionGrid = CreateTwoColumnRow(grid, 10, GridLength.Auto);
         CurrentCodexVersionText = new TextBlock
         {
             TextWrapping = TextWrapping.Wrap,
@@ -192,6 +200,8 @@ internal sealed class SettingsViewControl : UserControl
     public ComboBox LanguageComboBox { get; }
     public CheckBox StartWithWindowsCheckBox { get; }
     public CheckBox AutoShowWithCodexCheckBox { get; }
+    public CheckBox RateLimitAlertsCheckBox { get; }
+    public CheckBox SidebarHoverRevealCheckBox { get; }
     public TextBlock CurrentCodexVersionText { get; }
     public Button UpdateDetailsButton { get; }
     public Button CheckCodexVersionButton { get; }

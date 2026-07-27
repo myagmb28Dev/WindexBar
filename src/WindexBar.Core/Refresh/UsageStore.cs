@@ -10,6 +10,9 @@ public sealed class UsageStore : IDisposable
     private readonly SettingsStore _settings;
     private readonly ProviderDescriptor _codexDescriptor;
     private readonly WeeklyLimitImpactTracker? _weeklyLimitImpactTracker;
+    private readonly RateLimitAlertTracker? _rateLimitAlertTracker;
+    private readonly object _rateLimitAlertLock = new();
+    private IReadOnlyList<RateLimitThresholdAlert> _pendingRateLimitAlerts = [];
     private readonly object _sessionIndexWatcherLock = new();
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private PeriodicTimer? _timer;
@@ -20,11 +23,13 @@ public sealed class UsageStore : IDisposable
     public UsageStore(
         SettingsStore settings,
         ProviderDescriptor? codexDescriptor = null,
-        WeeklyLimitImpactTracker? weeklyLimitImpactTracker = null)
+        WeeklyLimitImpactTracker? weeklyLimitImpactTracker = null,
+        RateLimitAlertTracker? rateLimitAlertTracker = null)
     {
         _settings = settings;
         _codexDescriptor = codexDescriptor ?? CodexProviderDescriptor.Create();
         _weeklyLimitImpactTracker = weeklyLimitImpactTracker;
+        _rateLimitAlertTracker = rateLimitAlertTracker;
     }
 
     public UsageSnapshot? Snapshot { get; private set; }
@@ -32,6 +37,16 @@ public sealed class UsageStore : IDisposable
     public string? LastError { get; private set; }
     public string? LastSourceLabel { get; private set; }
     public bool IsRefreshing { get; private set; }
+
+    public IReadOnlyList<RateLimitThresholdAlert> TakeRateLimitAlerts()
+    {
+        lock (_rateLimitAlertLock)
+        {
+            var alerts = _pendingRateLimitAlerts;
+            _pendingRateLimitAlerts = [];
+            return alerts;
+        }
+    }
 
     public event EventHandler? Changed;
 
@@ -57,6 +72,10 @@ public sealed class UsageStore : IDisposable
             Credits = null;
             LastError = null;
             LastSourceLabel = null;
+            lock (_rateLimitAlertLock)
+            {
+                _pendingRateLimitAlerts = [];
+            }
             OnChanged();
             return;
         }
@@ -81,6 +100,12 @@ public sealed class UsageStore : IDisposable
             }
 
             Snapshot = _weeklyLimitImpactTracker?.Apply(outcome.Result.Usage) ?? outcome.Result.Usage;
+            lock (_rateLimitAlertLock)
+            {
+                _pendingRateLimitAlerts = _settings.Config.RateLimitAlerts.Enabled
+                    ? _rateLimitAlertTracker?.Apply(Snapshot) ?? []
+                    : [];
+            }
             Credits = outcome.Result.Credits;
             LastSourceLabel = outcome.Result.SourceLabel;
             LastError = null;

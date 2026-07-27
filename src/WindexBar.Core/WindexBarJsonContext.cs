@@ -14,4 +14,5 @@ namespace WindexBar.Core;
 [JsonSerializable(typeof(RpcAccountResponse))]
 [JsonSerializable(typeof(RpcThreadListResponse))]
 [JsonSerializable(typeof(WeeklyLimitImpactState))]
+[JsonSerializable(typeof(RateLimitAlertState))]
 internal sealed partial class WindexBarJsonContext : JsonSerializerContext;
