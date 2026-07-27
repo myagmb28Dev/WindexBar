@@ -600,6 +600,9 @@ public sealed class ConfigTests
         Assert.Equal(WindexBarConfig.DefaultToggleSidebarHotkey, reloaded.Hotkeys.ToggleSidebar);
         Assert.True(reloaded.StartWithWindows);
         Assert.False(reloaded.AutoShowWithCodex);
+        Assert.False(reloaded.Sidebar.ShowOnHover);
+        Assert.Null(reloaded.Window.ClientWidth);
+        Assert.Null(reloaded.Window.ClientHeight);
         Assert.Equal(StyleConfig.DefaultGaugeThickness, reloaded.Style.GaugeThickness);
         Assert.Equal(StyleConfig.DefaultGaugeColor, reloaded.Style.GaugeColor);
         Assert.Equal(StyleConfig.DefaultGaugeAnimation, reloaded.Style.GaugeAnimation);
@@ -680,6 +683,63 @@ public sealed class ConfigTests
         var reloaded = store.LoadOrCreateDefault();
 
         Assert.True(reloaded.AutoShowWithCodex);
+    }
+
+    [Fact]
+    public void PreservesRateLimitAlertPreference()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
+        var store = new WindexBarConfigStore(path);
+        var config = store.LoadOrCreateDefault();
+        config.RateLimitAlerts.Enabled = false;
+        store.Save(config);
+
+        var reloaded = store.LoadOrCreateDefault();
+
+        Assert.False(reloaded.RateLimitAlerts.Enabled);
+    }
+
+    [Fact]
+    public void PreservesSidebarHoverRevealPreference()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
+        var store = new WindexBarConfigStore(path);
+        var config = store.LoadOrCreateDefault();
+        config.Sidebar.ShowOnHover = true;
+        store.Save(config);
+
+        var reloaded = store.LoadOrCreateDefault();
+
+        Assert.True(reloaded.Sidebar.ShowOnHover);
+    }
+
+    [Fact]
+    public void PreservesSavedWindowClientSize()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
+        var store = new WindexBarConfigStore(path);
+        var config = store.LoadOrCreateDefault();
+        config.Window.ClientWidth = 287.5;
+        config.Window.ClientHeight = 221.25;
+        store.Save(config);
+
+        var reloaded = store.LoadOrCreateDefault();
+
+        Assert.Equal(287.5, reloaded.Window.ClientWidth);
+        Assert.Equal(221.25, reloaded.Window.ClientHeight);
+    }
+
+    [Fact]
+    public void InvalidSavedWindowClientSizeIsDiscarded()
+    {
+        var config = WindexBarConfig.Default();
+        config.Window.ClientWidth = double.NaN;
+        config.Window.ClientHeight = 20;
+
+        config.Normalized();
+
+        Assert.Null(config.Window.ClientWidth);
+        Assert.Null(config.Window.ClientHeight);
     }
 
     [Fact]
@@ -1998,7 +2058,7 @@ public sealed class InstallerBuildScriptTests
     }
 
     [Fact]
-    public void AutoShowModeDisablesWindowToggleShortcut()
+    public void AutoShowModeLocksWindowToggleShortcutAndShowsNotice()
     {
         var settingsController = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "Controllers", "SettingsController.cs")));
         var trayService = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "TrayIconService.cs")));
@@ -2006,10 +2066,10 @@ public sealed class InstallerBuildScriptTests
         Assert.Contains("ApplyAutoShowShortcutState();", settingsController, StringComparison.Ordinal);
         Assert.Contains("_view.ToggleHotkeyButton.IsEnabled = !enabled", settingsController, StringComparison.Ordinal);
         Assert.Contains("_view.ToggleHotkeyButton.Opacity = enabled ? 0.45 : 1", settingsController, StringComparison.Ordinal);
-        Assert.Contains("if (!_settingsStore.Config.AutoShowWithCodex)", trayService, StringComparison.Ordinal);
         Assert.Contains("RegisterHotkey(ToggleWindowHotkeyId", trayService, StringComparison.Ordinal);
-        Assert.Contains("_hotkeyService.Unregister(ToggleWindowHotkeyId)", trayService, StringComparison.Ordinal);
-        Assert.Contains("false);", trayService, StringComparison.Ordinal);
+        Assert.Contains("if (_settingsStore.Config.AutoShowWithCodex)", trayService, StringComparison.Ordinal);
+        Assert.Contains("ShowModeLockedNotice(", trayService, StringComparison.Ordinal);
+        Assert.DoesNotContain("_hotkeyService.Unregister(ToggleWindowHotkeyId)", trayService, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2018,6 +2078,7 @@ public sealed class InstallerBuildScriptTests
         var trayService = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "TrayIconService.cs")));
         var applyAutoVisibility = ExtractMethodBody(trayService, "private void ApplyAutoVisibility(bool isCodexActivity)");
 
+        Assert.Contains("if (_statusWindow is not null && WindowCloseBehavior.IsVisible(_statusWindow))", applyAutoVisibility, StringComparison.Ordinal);
         Assert.Contains("WindowCloseBehavior.ShowPassive(window)", applyAutoVisibility, StringComparison.Ordinal);
         Assert.DoesNotContain("window.ShowHudView()", applyAutoVisibility, StringComparison.Ordinal);
     }
@@ -2115,6 +2176,9 @@ public sealed class TrayIconServiceTests
                 "WindowCloseBehavior\\.IsVisible\\(window\\).*window\\.ToggleSideBar\\(\\).*WindowCloseBehavior\\.Show\\(window\\)",
                 RegexOptions.Singleline),
             toggleSidebarBody);
+        Assert.Contains("_settingsStore.Config.Sidebar.ShowOnHover", toggleSidebarBody, StringComparison.Ordinal);
+        Assert.Contains("ShowModeLockedNotice(", toggleSidebarBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("_hotkeyService.Unregister(ToggleSidebarHotkeyId)", service, StringComparison.Ordinal);
     }
 
     private static string ExtractMethodBody(string source, string signature)
@@ -2248,6 +2312,85 @@ public sealed class ReleaseWorkflowTests
 
         var trayService = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "TrayIconService.cs")));
         Assert.Contains("_statusWindow?.HasOpenAppUpdatePrompt == true", trayService, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SidebarUsesAnUnconstrainedPopupWithoutResizingTheMainWindow()
+    {
+        var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "MainWindow.xaml.cs")));
+
+        Assert.Contains("Child = SideBarPanel", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("HorizontalOffset = -SideBarVisualWidth", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("VerticalOffset = TitleBarClientHeight", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("ShouldConstrainToRootBounds = false", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("NavigateFromSideBar(", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("WindowCloseBehavior.ActivateForInput(this);", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("var scrollViewer = VisibleScrollViewer();", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("scrollViewer.IsTabStop = true;", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("scrollViewer.Focus(FocusState.Programmatic)", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("_sideBarHoverPollTimer = new DispatcherTimer", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("PollSideBarHoverRegion", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("GetCursorPos(out var cursor)", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("isOverExternalRegion || isOverInternalRegion", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("RootLayout.SizeChanged += RootLayout_SizeChanged;", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("_settingsStore.Config.Sidebar.ShowOnHover", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("SideBarPopup.XamlRoot = RootLayout.XamlRoot", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("SideBarPopup.IsOpen != shouldOpenSideBar", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("RootLayout.ActualHeight - TitleBarClientHeight - SideBarBottomMargin", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("SideBarPanel.Height = sideBarHeight", mainWindow, StringComparison.Ordinal);
+        Assert.DoesNotContain("OnSideBarScrollNavigationKeyDown", mainWindow, StringComparison.Ordinal);
+        Assert.DoesNotContain("SideBarHoverTarget", mainWindow, StringComparison.Ordinal);
+        Assert.DoesNotContain("SideBarPanel.PointerEntered", mainWindow, StringComparison.Ordinal);
+        Assert.DoesNotContain("SideBarColumn", mainWindow, StringComparison.Ordinal);
+
+        var toggleStart = mainWindow.IndexOf("public void ToggleSideBar()", StringComparison.Ordinal);
+        var toggleEnd = mainWindow.IndexOf("private bool IsSideBarHoverRevealEnabled", toggleStart, StringComparison.Ordinal);
+        Assert.True(toggleStart >= 0 && toggleEnd > toggleStart);
+        Assert.Contains("if (IsSideBarHoverRevealEnabled)", mainWindow[toggleStart..toggleEnd], StringComparison.Ordinal);
+        Assert.DoesNotContain("ResizeForCurrentView();", mainWindow[toggleStart..toggleEnd], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WindowClientSizeIsRestoredAcrossAppRestarts()
+    {
+        var app = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "App.xaml.cs")));
+        var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "MainWindow.xaml.cs")));
+
+        Assert.Contains("if (!TryRestoreWindowSize())", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("_settingsStore.Config.Window.ClientWidth", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("_settingsStore.Config.Window.ClientHeight", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("SettingsStore.Persist();", app, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SettingsAndStyleOptionsProvideLocalizedHoverHelp()
+    {
+        var settingsController = File.ReadAllText(FindRepositoryFile(Path.Combine(
+            "src",
+            "WindexBar.Windows",
+            "Controllers",
+            "SettingsController.cs")));
+        var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "MainWindow.xaml.cs")));
+        var featureViewHelpers = File.ReadAllText(FindRepositoryFile(Path.Combine(
+            "src",
+            "WindexBar.Windows",
+            "Views",
+            "FeatureViewHelpers.cs")));
+
+        Assert.Contains("ApplyOptionTooltips(text);", settingsController, StringComparison.Ordinal);
+        Assert.Contains("This locks the window toggle.", settingsController, StringComparison.Ordinal);
+        Assert.Contains("This locks the sidebar toggle.", settingsController, StringComparison.Ordinal);
+        Assert.Contains("ApplyStyleTooltips();", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("ToolTipService.SetToolTip", featureViewHelpers, StringComparison.Ordinal);
+        Assert.Contains("if (!IsArrowKeyInputControl(args.OriginalSource as DependencyObject))", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("or ButtonBase", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("ModeLockNoticePopup = new Popup", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("Width = ModeLockNoticeWidth", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("IsHitTestVisible = false", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("IsLightDismissEnabled = false", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("ModeLockNoticePopup.IsOpen = true", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("ModeLockNoticeDurationMilliseconds", mainWindow, StringComparison.Ordinal);
+        Assert.DoesNotContain("_modeLockNoticeWindow", mainWindow, StringComparison.Ordinal);
     }
 
     [Fact]

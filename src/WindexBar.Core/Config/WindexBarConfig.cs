@@ -5,7 +5,7 @@ namespace WindexBar.Core.Config;
 
 public sealed class WindexBarConfig
 {
-    public const int CurrentVersion = 7;
+    public const int CurrentVersion = 10;
     public const int MinRefreshIntervalSeconds = 1;
     public const int DefaultRefreshIntervalSeconds = 30;
     public const int MaxRefreshIntervalSeconds = 3600;
@@ -42,6 +42,15 @@ public sealed class WindexBarConfig
     [JsonPropertyName("appUpdates")]
     public AppUpdateConfig AppUpdates { get; set; } = new();
 
+    [JsonPropertyName("rateLimitAlerts")]
+    public RateLimitAlertConfig RateLimitAlerts { get; set; } = new();
+
+    [JsonPropertyName("sidebar")]
+    public SidebarConfig Sidebar { get; set; } = new();
+
+    [JsonPropertyName("window")]
+    public WindowConfig Window { get; set; } = new();
+
     [JsonPropertyName("style")]
     public StyleConfig Style { get; set; } = new();
 
@@ -54,6 +63,9 @@ public sealed class WindexBarConfig
         Hotkeys = (Hotkeys ?? new HotkeyConfig()).Normalized();
         CodexUpdates = (CodexUpdates ?? new CodexUpdateConfig()).Normalized();
         AppUpdates = (AppUpdates ?? new AppUpdateConfig()).Normalized();
+        RateLimitAlerts ??= new RateLimitAlertConfig();
+        Sidebar ??= new SidebarConfig();
+        Window = (Window ?? new WindowConfig()).Normalized();
         Style = (Style ?? new StyleConfig()).Normalized();
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -103,6 +115,43 @@ public sealed class WindexBarConfig
 
         Providers.Add(value.Normalized());
     }
+}
+
+public sealed class RateLimitAlertConfig
+{
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; set; } = true;
+}
+
+public sealed class SidebarConfig
+{
+    [JsonPropertyName("showOnHover")]
+    public bool ShowOnHover { get; set; }
+}
+
+public sealed class WindowConfig
+{
+    private const double MinimumClientWidth = 160;
+    private const double MinimumClientHeight = 100;
+    private const double MaximumClientDimension = 10_000;
+
+    [JsonPropertyName("clientWidth")]
+    public double? ClientWidth { get; set; }
+
+    [JsonPropertyName("clientHeight")]
+    public double? ClientHeight { get; set; }
+
+    public WindowConfig Normalized()
+    {
+        ClientWidth = NormalizeDimension(ClientWidth, MinimumClientWidth);
+        ClientHeight = NormalizeDimension(ClientHeight, MinimumClientHeight);
+        return this;
+    }
+
+    private static double? NormalizeDimension(double? value, double minimum) =>
+        value is { } dimension && double.IsFinite(dimension) && dimension >= minimum && dimension <= MaximumClientDimension
+            ? dimension
+            : null;
 }
 
 public sealed class AppUpdateConfig

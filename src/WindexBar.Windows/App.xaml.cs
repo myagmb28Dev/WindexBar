@@ -56,7 +56,8 @@ public partial class App : WinApplication
 
         UsageStore = new UsageStore(
             SettingsStore,
-            weeklyLimitImpactTracker: new WeeklyLimitImpactTracker(new WeeklyLimitImpactStateStore()));
+            weeklyLimitImpactTracker: new WeeklyLimitImpactTracker(new WeeklyLimitImpactStateStore()),
+            rateLimitAlertTracker: new RateLimitAlertTracker(new RateLimitAlertStateStore()));
         _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
         _appUpdateHttpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
         CodexCliUpdateService = new CodexCliUpdateService(
@@ -91,6 +92,15 @@ public partial class App : WinApplication
 
         _shuttingDown = true;
         _appUpdateCancellation?.Cancel();
+        try
+        {
+            SettingsStore.Persist();
+        }
+        catch (Exception error)
+        {
+            LogMessage($"Failed to save settings during shutdown: {error.Message}");
+        }
+
         TrayIconService.Dispose();
         UsageStore.Dispose();
         _httpClient?.Dispose();

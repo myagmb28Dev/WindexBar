@@ -140,6 +140,17 @@ public sealed class TrayIconService : IDisposable
             return;
         }
 
+        if (_settingsStore.Config.AutoShowWithCodex)
+        {
+            ShowModeLockedNotice(
+                Text("Window toggle locked", "창 토글 잠김"),
+                Text(
+                    "Automatic Codex visibility is enabled. WindexBar is shown only while ChatGPT Desktop or Codex is active.",
+                    "Codex 자동 표시가 켜져 있어요. ChatGPT Desktop 또는 Codex 사용 중에만 WindexBar가 표시돼요."));
+            LogMessage("WindexBar window hotkey ignored because Codex auto-show is enabled.");
+            return;
+        }
+
         try
         {
             var window = GetOrCreateStatusWindow();
@@ -242,10 +253,12 @@ public sealed class TrayIconService : IDisposable
         _dispatcher.TryEnqueue(ShowStatusWindow);
     }
 
-    private void OnUsageChanged(object? sender, EventArgs args)
-    {
-        _dispatcher.TryEnqueue(UpdateTooltip);
-    }
+    private void OnUsageChanged(object? sender, EventArgs args) =>
+        _dispatcher.TryEnqueue(() =>
+        {
+            UpdateTooltip();
+            ShowRateLimitAlerts();
+        });
 
     private void OnSettingsChanged(object? sender, EventArgs args)
     {
@@ -260,16 +273,7 @@ public sealed class TrayIconService : IDisposable
 
     private void RegisterHotkeys()
     {
-        if (!_settingsStore.Config.AutoShowWithCodex)
-        {
-            RegisterHotkey(ToggleWindowHotkeyId, _settingsStore.Config.Hotkeys.ToggleWindow, ToggleStatusWindow, "window");
-        }
-        else
-        {
-            _hotkeyService.Unregister(ToggleWindowHotkeyId);
-            LogMessage("WindexBar window hotkey disabled while Codex auto-show is enabled.");
-        }
-
+        RegisterHotkey(ToggleWindowHotkeyId, _settingsStore.Config.Hotkeys.ToggleWindow, ToggleStatusWindow, "window");
         RegisterHotkey(ToggleSidebarHotkeyId, _settingsStore.Config.Hotkeys.ToggleSidebar, ToggleSidebar, "sidebar");
     }
 
@@ -288,6 +292,17 @@ public sealed class TrayIconService : IDisposable
     {
         if (_disposed)
         {
+            return;
+        }
+
+        if (_settingsStore.Config.Sidebar.ShowOnHover)
+        {
+            ShowModeLockedNotice(
+                Text("Sidebar toggle locked", "사이드바 토글 잠김"),
+                Text(
+                    "Sidebar hover reveal is enabled. Move the pointer to the sidebar edge to use it.",
+                    "사이드바 호버 표시가 켜져 있어요. 사이드바 가장자리에 마우스를 올려 사용해 주세요."));
+            LogMessage("WindexBar sidebar hotkey ignored because sidebar hover reveal is enabled.");
             return;
         }
 
@@ -315,6 +330,17 @@ public sealed class TrayIconService : IDisposable
         {
             UpdateTooltip();
         }
+    }
+
+    private void ShowModeLockedNotice(string title, string message)
+    {
+        if (_statusWindow is { } window && WindowCloseBehavior.IsVisible(window))
+        {
+            window.ShowModeLockedNotice(title, message);
+            return;
+        }
+
+        _notifyIcon.ShowBalloonTip(6_000, title, message, Forms.ToolTipIcon.Info);
     }
 
     private void OnCodexActivitySampled(object? sender, bool isActive)
@@ -355,6 +381,11 @@ public sealed class TrayIconService : IDisposable
 
         if (shouldShow)
         {
+            if (_statusWindow is not null && WindowCloseBehavior.IsVisible(_statusWindow))
+            {
+                return;
+            }
+
             TryShowWindow(window =>
             {
                 var status = WindowCloseBehavior.ShowPassive(window);
@@ -377,6 +408,33 @@ public sealed class TrayIconService : IDisposable
             _usageStore.Credits,
             _uiError ?? _usageStore.LastError,
             _settingsStore.Config.Language);
+    }
+
+    private void ShowRateLimitAlerts()
+    {
+        var alerts = _usageStore.TakeRateLimitAlerts();
+        if (alerts.Count == 0)
+        {
+            return;
+        }
+
+        var korean = IsKorean(_settingsStore.Config.Language);
+        var message = string.Join(
+            Environment.NewLine,
+            alerts.Select(alert =>
+            {
+                var window = alert.Window == RateLimitAlertWindow.Weekly
+                    ? Text("Weekly limit", "\uC8FC\uAC04 \uD55C\uB3C4")
+                    : Text("Current limit", "\uD604\uC7AC \uD55C\uB3C4");
+                return korean
+                    ? $"{window}: {alert.UsedPercent:0.#}% \uC0AC\uC6A9 ({alert.ThresholdPercent}% \uB3C4\uB2EC)"
+                    : $"{window}: {alert.UsedPercent:0.#}% used ({alert.ThresholdPercent}% threshold)";
+            }));
+        _notifyIcon.ShowBalloonTip(
+            10_000,
+            Text("Codex limit alert", "Codex \uD55C\uB3C4 \uC54C\uB9BC"),
+            message,
+            Forms.ToolTipIcon.Warning);
     }
 
     private static string TooltipText(UsageSnapshot? snapshot, CreditsSnapshot? credits, string? error, string language)

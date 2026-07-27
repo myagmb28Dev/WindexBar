@@ -33,6 +33,14 @@ internal static class FeatureViewHelpers
         FontSize = 12
     };
 
+    public static void SetToolTip(string text, params FrameworkElement[] elements)
+    {
+        foreach (var element in elements)
+        {
+            ToolTipService.SetToolTip(element, text);
+        }
+    }
+
     public static SolidColorBrush Brush(byte a, byte r, byte g, byte b) =>
         new(global::Windows.UI.Color.FromArgb(a, r, g, b));
 }

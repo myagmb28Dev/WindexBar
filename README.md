@@ -11,6 +11,7 @@
 
 - System tray status for Codex usage, with a compact always-on-top window.
 - Account-wide current and weekly rate-limit windows, including reset countdowns when Codex exposes reset times.
+- Tray alerts when current or weekly usage reaches 80% and 90%, re-armed when Codex reports the next reset window.
 - Active Codex model and reasoning effort (including Max and Ultra when exposed).
 - Per-session context-window usage and cumulative token totals, grouped by project.
 - Observed weekly-limit impact for individual sessions, proportionally attributed by token growth when several sessions are active together.
@@ -22,10 +23,10 @@
 - Banked rate-limit reset credit count with exact expiration details from Codex app-server when provided.
 - Reset-credit details grouped by exact expiration time, with unavailable expirations shown explicitly.
 - Remaining ChatGPT credits when Codex exposes the balance.
-- Collapsible sidebar, toggled from the title or a shortcut.
+- A bookmark-style sidebar shown beside the left edge of the content card without resizing the main window; title-click and shortcuts pin it, while opt-in hover reveal locks those sidebar toggles.
 - A dedicated Style sidebar for gauge thickness, a pop-up fill color picker, and animation controls.
 - Optional auto-show mode while ChatGPT Desktop or a terminal Codex process is active.
-- Settings for refresh interval, language, Windows startup, Alt+O show/hide, and Alt+B sidebar shortcuts.
+- Settings for refresh interval, language, Windows startup, rate-limit alerts, optional sidebar hover reveal, Alt+O show/hide, and Alt+B sidebar shortcuts, with hover help and locked-mode notices for conflicting actions.
 
 Reset-credit expiration dates come directly from Codex app-server. If the installed Codex version or backend returns only the available count, WindexBar shows that expiration details are unavailable instead of estimating a date.
 
