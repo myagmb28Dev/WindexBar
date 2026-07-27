@@ -35,7 +35,7 @@ jobs:
 
       - name: Restore
         shell: pwsh
-        run: dotnet restore .\WindexBar.slnx -p:NuGetAudit=false
+        run: dotnet restore .\WindexBar.slnx --runtime win-x64 -p:NuGetAudit=false
 
       - name: Build
         shell: pwsh
