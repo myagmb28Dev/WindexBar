@@ -34,7 +34,7 @@ internal sealed class HudViewControl : UserControl
         root.Children.Add(ScrollViewer);
 
         var content = new Grid { RowSpacing = 8 };
-        for (var index = 0; index < 5; index++)
+        for (var index = 0; index < 6; index++)
         {
             content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         }
@@ -67,12 +67,16 @@ internal sealed class HudViewControl : UserControl
         Grid.SetColumn(ModelPageText, 1);
         header.Children.Add(ModelPageText);
 
+        var titleDivider = FeatureViewHelpers.CreateDivider();
+        Grid.SetRow(titleDivider, 1);
+        content.Children.Add(titleDivider);
+
         MetaText = new TextBlock
         {
             TextTrimming = TextTrimming.CharacterEllipsis,
             TextWrapping = TextWrapping.NoWrap
         };
-        Grid.SetRow(MetaText, 1);
+        Grid.SetRow(MetaText, 2);
         content.Children.Add(MetaText);
 
         ModelContentPanel = new Grid { RowSpacing = 4 };
@@ -82,7 +86,7 @@ internal sealed class HudViewControl : UserControl
         {
             ModelContentPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         }
-        Grid.SetRow(ModelContentPanel, 2);
+        Grid.SetRow(ModelContentPanel, 3);
         content.Children.Add(ModelContentPanel);
 
         CurrentGauge = AddWindowSection(ModelContentPanel, 0, "current", out var currentLabel, out var currentPercent, out var currentDetail);
@@ -94,14 +98,14 @@ internal sealed class HudViewControl : UserControl
         WeeklyPercentText = weeklyPercent;
         WeeklyDetailText = weeklyDetail;
 
-        AccountText = AddLabelValueRow(content, 3, "Account", out var accountLabel);
+        AccountText = AddLabelValueRow(content, 4, "Account", out var accountLabel);
         AccountLabelText = accountLabel;
         ErrorText = new TextBlock
         {
             Foreground = Brush(0xFF, 0xFF, 0x5F, 0x57),
             TextWrapping = TextWrapping.Wrap
         };
-        Grid.SetRow(ErrorText, 4);
+        Grid.SetRow(ErrorText, 5);
         content.Children.Add(ErrorText);
 
         var buttons = new StackPanel

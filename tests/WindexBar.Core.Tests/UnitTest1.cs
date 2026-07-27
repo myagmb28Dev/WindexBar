@@ -2381,6 +2381,7 @@ public sealed class ReleaseWorkflowTests
         Assert.Contains("This locks the window toggle.", settingsController, StringComparison.Ordinal);
         Assert.Contains("This locks the sidebar toggle.", settingsController, StringComparison.Ordinal);
         Assert.Contains("ApplyStyleTooltips();", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("SaveStyleButton.Content = Text(\"Save\", \"\\uC800\\uC7A5\");", mainWindow, StringComparison.Ordinal);
         Assert.Contains("ToolTipService.SetToolTip", featureViewHelpers, StringComparison.Ordinal);
         Assert.Contains("if (!IsArrowKeyInputControl(args.OriginalSource as DependencyObject))", mainWindow, StringComparison.Ordinal);
         Assert.Contains("or ButtonBase", mainWindow, StringComparison.Ordinal);
@@ -2391,6 +2392,41 @@ public sealed class ReleaseWorkflowTests
         Assert.Contains("ModeLockNoticePopup.IsOpen = true", mainWindow, StringComparison.Ordinal);
         Assert.Contains("ModeLockNoticeDurationMilliseconds", mainWindow, StringComparison.Ordinal);
         Assert.DoesNotContain("_modeLockNoticeWindow", mainWindow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GaugeColorAndBrightnessChangesRefreshTheStylePreviewImmediately()
+    {
+        var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "MainWindow.xaml.cs")));
+        var colorWindowStart = mainWindow.IndexOf("private void ShowGaugeColorWindow()", StringComparison.Ordinal);
+        var colorWindowEnd = mainWindow.IndexOf("private static global::Windows.UI.Color NormalizeGaugeColorBrightness", colorWindowStart, StringComparison.Ordinal);
+
+        Assert.True(colorWindowStart >= 0 && colorWindowEnd > colorWindowStart);
+        var colorWindow = mainWindow[colorWindowStart..colorWindowEnd];
+        Assert.Contains("void PreviewCandidateColor()", colorWindow, StringComparison.Ordinal);
+        Assert.Contains("_previewGaugeColor = candidateColor;", colorWindow, StringComparison.Ordinal);
+        Assert.Equal(3, Regex.Matches(colorWindow, "PreviewCandidateColor\\(\\);").Count);
+        Assert.Contains("CloseCandidateColor(keepCandidate: true)", colorWindow, StringComparison.Ordinal);
+        Assert.Contains("CloseCandidateColor(keepCandidate: false)", colorWindow, StringComparison.Ordinal);
+        Assert.Contains("_previewGaugeColor = initialPreviewColor;", colorWindow, StringComparison.Ordinal);
+        Assert.Contains("closedWithoutAction", colorWindow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HomeSectionRendersTheSharedDividerBelowItsTitle()
+    {
+        var hudView = File.ReadAllText(FindRepositoryFile(Path.Combine(
+            "src",
+            "WindexBar.Windows",
+            "Views",
+            "HudViewControl.cs")));
+
+        Assert.Contains("var titleDivider = FeatureViewHelpers.CreateDivider();", hudView, StringComparison.Ordinal);
+        Assert.Contains("Grid.SetRow(titleDivider, 1);", hudView, StringComparison.Ordinal);
+        Assert.Contains("Grid.SetRow(MetaText, 2);", hudView, StringComparison.Ordinal);
+        Assert.Contains("Grid.SetRow(ModelContentPanel, 3);", hudView, StringComparison.Ordinal);
+        Assert.Contains("AddLabelValueRow(content, 4, \"Account\"", hudView, StringComparison.Ordinal);
+        Assert.Contains("Grid.SetRow(ErrorText, 5);", hudView, StringComparison.Ordinal);
     }
 
     [Fact]

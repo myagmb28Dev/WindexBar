@@ -1836,6 +1836,38 @@ public sealed partial class MainWindow : Window
         var brightnessValue = Math.Max(_previewGaugeColor.R, Math.Max(_previewGaugeColor.G, _previewGaugeColor.B)) / 255d;
         var baseColor = NormalizeGaugeColorBrightness(_previewGaugeColor);
         var candidateColor = _previewGaugeColor;
+        var initialPreviewColor = _previewGaugeColor;
+        var isClosingColorWindow = false;
+
+        void PreviewCandidateColor()
+        {
+            _previewGaugeColor = candidateColor;
+            UpdateGaugeColorButton(_previewGaugeColor);
+            ApplyStylePreview();
+        }
+
+        void CloseCandidateColor(bool keepCandidate)
+        {
+            if (isClosingColorWindow)
+            {
+                return;
+            }
+
+            isClosingColorWindow = true;
+            if (keepCandidate)
+            {
+                PreviewCandidateColor();
+            }
+            else
+            {
+                _previewGaugeColor = initialPreviewColor;
+                UpdateGaugeColorButton(_previewGaugeColor);
+                ApplyStylePreview();
+            }
+
+            CloseGaugeColorWindow(discardPendingColor: false);
+        }
+
         var palette = new[]
         {
             baseColor,
@@ -1896,6 +1928,7 @@ public sealed partial class MainWindow : Window
                 baseColor = paletteColor;
                 candidateColor = ApplyGaugeBrightness(baseColor, brightnessValue);
                 UpdateSwatchSelection();
+                PreviewCandidateColor();
             };
             Grid.SetColumn(swatch, index % 6);
             Grid.SetRow(swatch, index / 6);
@@ -1917,6 +1950,7 @@ public sealed partial class MainWindow : Window
         {
             brightnessValue = args.NewValue / 100d;
             candidateColor = ApplyGaugeBrightness(baseColor, brightnessValue);
+            PreviewCandidateColor();
         };
 
         var panel = new StackPanel { Width = 210, Spacing = 8 };
@@ -1929,15 +1963,9 @@ public sealed partial class MainWindow : Window
         });
         panel.Children.Add(brightness);
         var applyButton = FeatureViewHelpers.CreateCompactButton(Text("Apply", "\uC801\uC6A9"));
-        applyButton.Click += (_, _) =>
-        {
-            _previewGaugeColor = candidateColor;
-            UpdateGaugeColorButton(_previewGaugeColor);
-            ApplyStylePreview();
-            CloseGaugeColorWindow(discardPendingColor: false);
-        };
+        applyButton.Click += (_, _) => CloseCandidateColor(keepCandidate: true);
         var closeButton = FeatureViewHelpers.CreateCompactButton(Text("Close", "\uB2EB\uAE30"));
-        closeButton.Click += (_, _) => CloseGaugeColorWindow(discardPendingColor: false);
+        closeButton.Click += (_, _) => CloseCandidateColor(keepCandidate: false);
         var buttons = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -1988,9 +2016,11 @@ public sealed partial class MainWindow : Window
         var hasActivated = false;
         popup.Activated += (_, args) =>
         {
-            if (args.WindowActivationState == WindowActivationState.Deactivated && hasActivated)
+            if (args.WindowActivationState == WindowActivationState.Deactivated
+                && hasActivated
+                && ReferenceEquals(_gaugeColorWindow, popup))
             {
-                CloseGaugeColorWindow(discardPendingColor: false);
+                CloseCandidateColor(keepCandidate: false);
                 return;
             }
 
@@ -1998,7 +2028,14 @@ public sealed partial class MainWindow : Window
         };
         popup.Closed += (_, _) =>
         {
+            var closedWithoutAction = ReferenceEquals(_gaugeColorWindow, popup) && !isClosingColorWindow;
             _gaugeColorWindow = null;
+            if (closedWithoutAction)
+            {
+                _previewGaugeColor = initialPreviewColor;
+                UpdateGaugeColorButton(_previewGaugeColor);
+            }
+
             ApplyStylePreview();
         };
         popup.Activate();
@@ -2079,6 +2116,7 @@ public sealed partial class MainWindow : Window
         GaugeThicknessLabelText.Text = Text("Gauge thickness", "\uAC8C\uC774\uC9C0 \uB450\uAED8");
         GaugeColorLabelText.Text = Text("Gauge color", "\uAC8C\uC774\uC9C0 \uC0C9\uC0C1");
         GaugeAnimationLabelText.Text = Text("Animation", "\uC560\uB2C8\uBA54\uC774\uC158");
+        SaveStyleButton.Content = Text("Save", "\uC800\uC7A5");
         _settingsController.ApplyLanguage(Text);
         ApplyStyleTooltips();
         UpdateSessionSortToggleAppearance();
