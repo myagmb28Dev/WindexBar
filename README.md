@@ -29,8 +29,6 @@
 - Optional auto-show mode while ChatGPT Desktop or a terminal Codex process is active.
 - Settings for refresh interval, language, Windows startup, rate-limit alerts, optional sidebar hover reveal, Alt+O show/hide, and Alt+B sidebar shortcuts, with hover help and locked-mode notices for conflicting actions.
 
-Reset-credit expiration dates come directly from Codex app-server. If the installed Codex version or backend returns only the available count, WindexBar shows that expiration details are unavailable instead of estimating a date.
-
 ## Install
 
 Download and run `WindexBarSetup.exe` from the GitHub Releases page.
