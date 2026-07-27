@@ -2,13 +2,13 @@ using WindexBar.Core.Presentation;
 using WindexBar.Windows.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
+using static WindexBar.Windows.Views.FeatureViewHelpers;
 
 namespace WindexBar.Windows.Views;
 
 internal sealed class HudViewControl : UserControl
 {
-    public HudViewControl(Button quitButton)
+    public HudViewControl(Button quitButton, string versionText)
     {
         var rootBorder = new Border
         {
@@ -55,17 +55,16 @@ internal sealed class HudViewControl : UserControl
         };
         header.Children.Add(HeaderText);
 
-        ModelPageText = new TextBlock
+        VersionText = new TextBlock
         {
-            Margin = new Thickness(8, 0, 0, 0),
-            VerticalAlignment = VerticalAlignment.Center,
-            Foreground = Brush(0xFF, 0xB9, 0xA7, 0xE8),
+            Text = versionText,
             FontSize = 11,
-            TextAlignment = TextAlignment.Right,
-            Visibility = Visibility.Collapsed
+            Foreground = Brush(0xFF, 0xB9, 0xA7, 0xE8),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(8, 0, 0, 0)
         };
-        Grid.SetColumn(ModelPageText, 1);
-        header.Children.Add(ModelPageText);
+        Grid.SetColumn(VersionText, 1);
+        header.Children.Add(VersionText);
 
         var titleDivider = FeatureViewHelpers.CreateDivider();
         Grid.SetRow(titleDivider, 1);
@@ -80,8 +79,6 @@ internal sealed class HudViewControl : UserControl
         content.Children.Add(MetaText);
 
         ModelContentPanel = new Grid { RowSpacing = 4 };
-        ModelContentTransform = new TranslateTransform();
-        ModelContentPanel.RenderTransform = ModelContentTransform;
         for (var index = 0; index < 6; index++)
         {
             ModelContentPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -122,9 +119,8 @@ internal sealed class HudViewControl : UserControl
 
     public ScrollViewer ScrollViewer { get; }
     public Grid ModelContentPanel { get; }
-    public TranslateTransform ModelContentTransform { get; }
     public TextBlock HeaderText { get; }
-    public TextBlock ModelPageText { get; }
+    public TextBlock VersionText { get; }
     public TextBlock MetaText { get; }
     public TextBlock CurrentLabelText { get; }
     public TextBlock CurrentPercentText { get; }
@@ -233,6 +229,4 @@ internal sealed class HudViewControl : UserControl
         return value;
     }
 
-    private static SolidColorBrush Brush(byte a, byte r, byte g, byte b) =>
-        new(global::Windows.UI.Color.FromArgb(a, r, g, b));
 }

@@ -5,7 +5,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
-using Microsoft.UI.Xaml.Media;
+using static WindexBar.Windows.Views.FeatureViewHelpers;
 
 namespace WindexBar.Windows.Views;
 
@@ -14,23 +14,14 @@ internal sealed class SessionsViewControl : UserControl
     private readonly Dictionary<string, bool> _collapsedProjects = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<GaugeBar> _gauges = [];
     private bool _suppressSortEvent;
+    private SessionListViewModel? _lastRenderedModel;
 
     public SessionsViewControl(Button quitButton)
     {
-        var rootBorder = new Border
-        {
-            Padding = new Thickness(11, 9, 11, 9),
-            Background = Brush(0xFF, 0x1F, 0x1C, 0x24),
-            BorderBrush = Brush(0x99, 0x7D, 0x62, 0xC7),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(14)
-        };
-        Content = rootBorder;
-
         var root = new Grid { RowSpacing = 7 };
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        rootBorder.Child = root;
+        Content = CreateCard(root);
 
         ScrollViewer = new ScrollViewer
         {
@@ -52,11 +43,7 @@ internal sealed class SessionsViewControl : UserControl
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             VerticalAlignment = VerticalAlignment.Center
         };
-        TitleText.PointerPressed += (_, args) =>
-        {
-            HomeRequested?.Invoke(this, EventArgs.Empty);
-            args.Handled = true;
-        };
+        AttachHomeNavigation(TitleText, () => HomeRequested?.Invoke(this, EventArgs.Empty));
         titleRow.Children.Add(TitleText);
 
         SortToggle = new ToggleButton
@@ -75,13 +62,7 @@ internal sealed class SessionsViewControl : UserControl
         Grid.SetColumn(SortToggle, 1);
         titleRow.Children.Add(SortToggle);
         content.Children.Add(titleRow);
-        content.Children.Add(new Border
-        {
-            Height = 1,
-            Margin = new Thickness(0, 0, 0, 2),
-            Background = Brush(0x88, 0x7D, 0x62, 0xC7),
-            HorizontalAlignment = HorizontalAlignment.Stretch
-        });
+        content.Children.Add(CreateDivider());
 
         SessionPanel = new StackPanel { Spacing = 7 };
         content.Children.Add(SessionPanel);
@@ -118,6 +99,11 @@ internal sealed class SessionsViewControl : UserControl
 
     public void Render(SessionListViewModel model, StyleConfig style)
     {
+        if (_lastRenderedModel is not null && ModelsEqual(_lastRenderedModel, model))
+        {
+            return;
+        }
+
         SessionPanel.Children.Clear();
         _gauges.Clear();
         if (model.Projects.Count == 0)
@@ -128,6 +114,7 @@ internal sealed class SessionsViewControl : UserControl
                 Foreground = Brush(0xFF, 0xB9, 0xA7, 0xE8),
                 TextWrapping = TextWrapping.Wrap
             });
+            _lastRenderedModel = model;
             return;
         }
 
@@ -135,6 +122,33 @@ internal sealed class SessionsViewControl : UserControl
         {
             AddProject(project, model.ContextLabel, style);
         }
+
+        _lastRenderedModel = model;
+    }
+
+    private static bool ModelsEqual(SessionListViewModel left, SessionListViewModel right)
+    {
+        if (!string.Equals(left.EmptyMessage, right.EmptyMessage, StringComparison.Ordinal)
+            || !string.Equals(left.ContextLabel, right.ContextLabel, StringComparison.Ordinal)
+            || left.Projects.Count != right.Projects.Count)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < left.Projects.Count; index++)
+        {
+            var leftProject = left.Projects[index];
+            var rightProject = right.Projects[index];
+            if (!string.Equals(leftProject.Key, rightProject.Key, StringComparison.Ordinal)
+                || !string.Equals(leftProject.ProjectName, rightProject.ProjectName, StringComparison.Ordinal)
+                || leftProject.IsNonProject != rightProject.IsNonProject
+                || !leftProject.Sessions.SequenceEqual(rightProject.Sessions))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private void AddProject(SessionProjectViewModel project, string contextLabel, StyleConfig style)
@@ -264,8 +278,6 @@ internal sealed class SessionsViewControl : UserControl
         }
     }
 
-    private static SolidColorBrush Brush(byte a, byte r, byte g, byte b) =>
-        new(global::Windows.UI.Color.FromArgb(a, r, g, b));
 }
 
 internal sealed class SessionDetailsRequestedEventArgs(

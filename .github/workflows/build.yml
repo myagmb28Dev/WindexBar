@@ -2,6 +2,9 @@ name: Build
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - master
   push:
     branches:
       - master
@@ -32,12 +35,28 @@ jobs:
 
       - name: Restore
         shell: pwsh
-        run: dotnet restore .\WindexBar.slnx -p:NuGetAudit=false
+        run: dotnet restore .\WindexBar.slnx --runtime win-x64 -p:NuGetAudit=false
+
+      - name: Build
+        shell: pwsh
+        run: >
+          dotnet build .\WindexBar.slnx
+          --configuration Release
+          --no-restore
+          --nologo
+          --verbosity minimal
+          --disable-build-servers
+          -m:1
+          -p:BuildInParallel=false
+          -p:UseSharedCompilation=false
+          -p:NuGetAudit=false
 
       - name: Test
         shell: pwsh
         run: >
           dotnet test .\tests\WindexBar.Core.Tests\WindexBar.Core.Tests.csproj
+          --configuration Release
+          --no-build
           --no-restore
           --nologo
           --verbosity minimal

@@ -166,7 +166,7 @@ public static class SessionListViewModelFactory
                 out _);
     }
 
-    private static double? TokenContextPercent(TokenUsageSnapshot? tokenUsage)
+    public static double? TokenContextPercent(TokenUsageSnapshot? tokenUsage)
     {
         var current = tokenUsage?.Last ?? tokenUsage?.Total;
         if (current is null || tokenUsage?.ModelContextWindow is not { } contextWindow || contextWindow <= 0)

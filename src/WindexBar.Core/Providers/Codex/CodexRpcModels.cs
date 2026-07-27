@@ -82,12 +82,6 @@ public sealed class RpcRateLimitWindow
 
 public sealed class RpcCreditsSnapshot
 {
-    [JsonPropertyName("hasCredits")]
-    public bool HasCredits { get; set; }
-
-    [JsonPropertyName("unlimited")]
-    public bool Unlimited { get; set; }
-
     [JsonPropertyName("balance")]
     public string? Balance { get; set; }
 }
@@ -129,9 +123,6 @@ public sealed class RpcAccountResponse
 {
     [JsonPropertyName("account")]
     public RpcAccountDetails? Account { get; set; }
-
-    [JsonPropertyName("requiresOpenAiAuth")]
-    public bool? RequiresOpenAiAuth { get; set; }
 }
 
 public sealed class RpcAccountDetails
@@ -169,9 +160,4 @@ public sealed class RpcThreadSummary
     [JsonPropertyName("cwd")]
     public string? Cwd { get; set; }
 
-    [JsonPropertyName("createdAt")]
-    public long CreatedAt { get; set; }
-
-    [JsonPropertyName("updatedAt")]
-    public long UpdatedAt { get; set; }
 }

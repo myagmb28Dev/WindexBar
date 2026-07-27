@@ -1,4 +1,5 @@
 using WindexBar.Core.Models;
+using WindexBar.Core.Providers.Codex;
 
 namespace WindexBar.Core.Presentation;
 
@@ -130,43 +131,10 @@ public static class HudDisplayModelFactory
     }
 
     private static bool IsSameModelName(string lhs, string rhs) =>
-        string.Equals(NormalizeModelKey(lhs), NormalizeModelKey(rhs), StringComparison.OrdinalIgnoreCase);
+        string.Equals(CodexModelNaming.NormalizeModelKey(lhs), CodexModelNaming.NormalizeModelKey(rhs), StringComparison.OrdinalIgnoreCase);
 
     private static bool IsGenericCodexModel(string modelName) =>
         string.Equals(modelName.Trim(), "Codex", StringComparison.OrdinalIgnoreCase);
-
-    private static string NormalizeModelKey(string value)
-    {
-        var normalized = value.Replace('_', ' ').Replace('-', ' ').Trim();
-        var suffixes = new[]
-        {
-            " ultra reasoning effort", " max reasoning effort", " ultra reasoning", " max reasoning",
-            " extra high reasoning effort", " extra high reasoning", " xhigh reasoning effort", " xhigh reasoning",
-            " high reasoning effort", " high reasoning", " medium reasoning effort", " medium reasoning",
-            " low reasoning effort", " low reasoning", " minimal reasoning effort", " minimal reasoning",
-            " no reasoning", " none reasoning", " extra high", " ultra", " max", " xhigh", " high",
-            " medium", " low", " minimal", " none", " reasoning effort", " reasoning"
-        };
-
-        var changed = true;
-        while (changed)
-        {
-            changed = false;
-            foreach (var suffix in suffixes)
-            {
-                if (!normalized.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                normalized = normalized[..^suffix.Length].Trim();
-                changed = true;
-                break;
-            }
-        }
-
-        return new string(normalized.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
-    }
 
     private static string FirstNonBlank(params string?[] values) =>
         values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;

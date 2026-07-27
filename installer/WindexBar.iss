@@ -1,7 +1,7 @@
 #define AppName "WindexBar"
 #define AppExeName "WindexBar.Windows.exe"
 #ifndef AppVersion
-#define AppVersion "1.0.0"
+#error AppVersion must be supplied by build-installer.cmd
 #endif
 #ifndef SourceDir
 #define SourceDir "..\artifacts\publish\win-x64"
@@ -10,7 +10,7 @@
 #define OutputDir "..\artifacts\installer"
 #endif
 #ifndef SetupIconFile
-#define SetupIconFile "..\src\WindexBar.Windows\Assets\TrayIcon.ico"
+#define SetupIconFile "..\src\WindexBar.Windows\Assets\AppIcon.ico"
 #endif
 
 [Setup]

@@ -149,7 +149,6 @@ public sealed partial class MainWindow : Window
         _settingsController = new SettingsController(
             SettingsView,
             _settingsStore,
-            _usageStore,
             _codexUpdateController,
             ShowHudView);
         _gaugeAnimator.SetPrimaryBars(HudView.CurrentGauge, HudView.WeeklyGauge);
@@ -188,7 +187,7 @@ public sealed partial class MainWindow : Window
         _usageStore.Changed += OnUsageChanged;
         _settingsStore.Changed += OnSettingsChanged;
 
-        _gaugeAnimator.Start();
+        _gaugeAnimator.SetActive(AppWindow.IsVisible);
 
         Closed += (_, _) =>
         {
@@ -232,7 +231,7 @@ public sealed partial class MainWindow : Window
 
         var titleText = new TextBlock
         {
-            Text = $"WindexBar {AppReleaseVersion.DisplayValue}",
+            Text = "WindexBar",
             Margin = new Thickness(10, 0, 0, 0),
             Padding = new Thickness(0, 0, 12, 0),
             VerticalAlignment = VerticalAlignment.Center,
@@ -363,7 +362,7 @@ public sealed partial class MainWindow : Window
         SideBarPanel.Children.Add(SettingsButton);
 
 
-        HudView = new HudViewControl(CreateQuitButton());
+        HudView = new HudViewControl(CreateQuitButton(), AppReleaseVersion.DisplayValue);
         AttachTransientScrollBar(HudView.ScrollViewer);
         ContentRootGrid.Children.Add(HudView);
 
@@ -436,23 +435,6 @@ public sealed partial class MainWindow : Window
             Text("Non-project sessions first", "\uBE44\uD504\uB85C\uC81D\uD2B8 \uC138\uC158 \uC6B0\uC120"));
     }
 
-    private static Border CreateSectionDivider() => new()
-    {
-        Height = 1,
-        Margin = new Thickness(0, 0, 0, 2),
-        Background = Brush(0x88, 0x7D, 0x62, 0xC7),
-        HorizontalAlignment = HorizontalAlignment.Stretch
-    };
-
-    private void AttachSectionTitleHomeNavigation(TextBlock title)
-    {
-        title.PointerPressed += (_, args) =>
-        {
-            ShowHudView();
-            args.Handled = true;
-        };
-    }
-
     private static Button CreateTitleButton(Brush background, RoutedEventHandler handler)
     {
         var button = new Button
@@ -518,96 +500,6 @@ public sealed partial class MainWindow : Window
         };
     }
 
-    private static void AddWindowSection(
-        Grid root,
-        int row,
-        string label,
-        out TextBlock labelText,
-        out TextBlock percentText,
-        out Grid trackRoot,
-        out Border fillBar,
-        out Border sweepBar,
-        out TextBlock detailText)
-    {
-        var header = new Grid { Margin = row == 0 ? new Thickness(0, 2, 0, 0) : new Thickness(0, 3, 0, 0) };
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        Grid.SetRow(header, row);
-        root.Children.Add(header);
-
-        labelText = new TextBlock
-        {
-            Text = label,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            Foreground = Brush(0xFF, 0xED, 0xE7, 0xFF)
-        };
-        header.Children.Add(labelText);
-
-        percentText = new TextBlock { FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
-        Grid.SetColumn(percentText, 1);
-        header.Children.Add(percentText);
-
-        trackRoot = new Grid { Height = 6 };
-        Grid.SetRow(trackRoot, row + 1);
-        root.Children.Add(trackRoot);
-        trackRoot.Children.Add(new Border
-        {
-            Background = Brush(0xFF, 0x30, 0x28, 0x3A),
-            BorderBrush = Brush(0xFF, 0x5A, 0x4A, 0x74),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(3)
-        });
-        fillBar = new Border
-        {
-            Background = Brush(0xFF, 0x8D, 0x78, 0xD6),
-            HorizontalAlignment = HorizontalAlignment.Left,
-            CornerRadius = new CornerRadius(3)
-        };
-        trackRoot.Children.Add(fillBar);
-        sweepBar = new Border
-        {
-            Background = Brush(0xFF, 0xC8, 0xB9, 0xFF),
-            Opacity = 0.3,
-            IsHitTestVisible = false,
-            HorizontalAlignment = HorizontalAlignment.Left
-        };
-        trackRoot.Children.Add(sweepBar);
-
-        detailText = new TextBlock
-        {
-            Foreground = Brush(0xFF, 0xC9, 0xC4, 0xD2),
-            TextWrapping = TextWrapping.Wrap
-        };
-        Grid.SetRow(detailText, row + 2);
-        root.Children.Add(detailText);
-    }
-
-    private static TextBlock AddLabelValueRow(Grid root, int row, string label, out TextBlock labelText)
-    {
-        var grid = new Grid { ColumnSpacing = 8 };
-        if (row == 3)
-        {
-            grid.Margin = new Thickness(0, 4, 0, 0);
-        }
-
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(86) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        Grid.SetRow(grid, row);
-        root.Children.Add(grid);
-
-        labelText = new TextBlock
-        {
-            Text = label,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
-        };
-        grid.Children.Add(labelText);
-
-        var value = new TextBlock { TextWrapping = TextWrapping.Wrap };
-        Grid.SetColumn(value, 1);
-        grid.Children.Add(value);
-        return value;
-    }
-
     private void AttachTransientScrollBar(ScrollViewer scrollViewer)
     {
         scrollViewer.IsTabStop = true;
@@ -657,120 +549,92 @@ public sealed partial class MainWindow : Window
     }
 
 
-    private static Button CreateBackButton(object content)
-    {
-        return new Button
-        {
-            Content = content,
-            MinWidth = 56,
-            MinHeight = 26,
-            Padding = new Thickness(9, 2, 9, 2),
-            FontSize = 12
-        };
-    }
-
     private Button CreateQuitButton()
     {
-        var button = CreateBackButton("Quit");
+        var button = CreateCompactButton("Quit");
         button.Click += QuitButton_Click;
         _quitButtons.Add(button);
         return button;
     }
 
-    private static SolidColorBrush Brush(byte a, byte r, byte g, byte b) =>
-        new(global::Windows.UI.Color.FromArgb(a, r, g, b));
-
     public void ShowHudView()
     {
-        CloseGaugeColorWindow();
-        CloseAuxiliaryWindows();
-        SessionsView.Visibility = Visibility.Collapsed;
-        CreditsView.Visibility = Visibility.Collapsed;
-        StyleView.Visibility = Visibility.Collapsed;
-        SettingsView.Visibility = Visibility.Collapsed;
-        ResetCreditDetailsView.Visibility = Visibility.Collapsed;
-        HudView.Visibility = Visibility.Visible;
-        ApplyLanguage();
+        ShowContentView(HudView);
         RootLayout.Focus(FocusState.Programmatic);
         UpdateState();
     }
 
     public void ShowCreditsView()
     {
-        CloseGaugeColorWindow();
-        CloseAuxiliaryWindows();
-        HudView.Visibility = Visibility.Collapsed;
-        SessionsView.Visibility = Visibility.Collapsed;
-        StyleView.Visibility = Visibility.Collapsed;
-        SettingsView.Visibility = Visibility.Collapsed;
-        ResetCreditDetailsView.Visibility = Visibility.Collapsed;
-        CreditsView.Visibility = Visibility.Visible;
-        ApplyLanguage();
+        ShowContentView(CreditsView);
         RootLayout.Focus(FocusState.Programmatic);
         UpdateCredits(_usageStore.Credits);
     }
 
     public void ShowSettingsView()
     {
-        CloseGaugeColorWindow();
-        CloseAuxiliaryWindows();
-        _settingsController.Load();
-        HudView.Visibility = Visibility.Collapsed;
-        SessionsView.Visibility = Visibility.Collapsed;
-        CreditsView.Visibility = Visibility.Collapsed;
-        StyleView.Visibility = Visibility.Collapsed;
-        ResetCreditDetailsView.Visibility = Visibility.Collapsed;
-        SettingsView.Visibility = Visibility.Visible;
-        ApplyLanguage();
+        ShowContentView(SettingsView, beforeShow: _settingsController.Load);
     }
 
     public void ShowStyleView()
     {
-        CloseAuxiliaryWindows();
-        SelectStyleOption(GaugeThicknessComboBox, _settingsStore.Config.Style.GaugeThickness);
-        SelectStyleOption(GaugeAnimationComboBox, _settingsStore.Config.Style.GaugeAnimation);
-        _selectedGaugeColor = ParseGaugeColor(_settingsStore.Config.Style.GaugeColor);
-        _previewGaugeColor = _selectedGaugeColor;
-        UpdateGaugeColorButton(_selectedGaugeColor);
-        HudView.Visibility = Visibility.Collapsed;
-        SessionsView.Visibility = Visibility.Collapsed;
-        CreditsView.Visibility = Visibility.Collapsed;
-        SettingsView.Visibility = Visibility.Collapsed;
-        ResetCreditDetailsView.Visibility = Visibility.Collapsed;
-        StyleView.Visibility = Visibility.Visible;
-        ApplyLanguage();
+        ShowContentView(
+            StyleView,
+            closeGaugeColor: false,
+            beforeShow: () =>
+            {
+                SelectStyleOption(GaugeThicknessComboBox, _settingsStore.Config.Style.GaugeThickness);
+                SelectStyleOption(GaugeAnimationComboBox, _settingsStore.Config.Style.GaugeAnimation);
+                _selectedGaugeColor = ParseGaugeColor(_settingsStore.Config.Style.GaugeColor);
+                _previewGaugeColor = _selectedGaugeColor;
+                UpdateGaugeColorButton(_selectedGaugeColor);
+            });
         ApplyStylePreview();
         RootLayout.Focus(FocusState.Programmatic);
     }
 
     public void ShowResetCreditDetailsView()
     {
-        CloseGaugeColorWindow();
-        CloseAuxiliaryWindows();
-        HudView.Visibility = Visibility.Collapsed;
-        SessionsView.Visibility = Visibility.Collapsed;
-        CreditsView.Visibility = Visibility.Collapsed;
-        StyleView.Visibility = Visibility.Collapsed;
-        SettingsView.Visibility = Visibility.Collapsed;
-        ResetCreditDetailsView.Visibility = Visibility.Visible;
-        ApplyLanguage();
+        ShowContentView(ResetCreditDetailsView);
         RootLayout.Focus(FocusState.Programmatic);
         UpdateResetCreditDetails(_usageStore.Snapshot?.RateLimitResetCredits);
     }
 
     public void ShowSessionsView()
     {
-        CloseGaugeColorWindow();
-        CloseAuxiliaryWindows();
-        HudView.Visibility = Visibility.Collapsed;
-        CreditsView.Visibility = Visibility.Collapsed;
-        StyleView.Visibility = Visibility.Collapsed;
-        SettingsView.Visibility = Visibility.Collapsed;
-        ResetCreditDetailsView.Visibility = Visibility.Collapsed;
-        SessionsView.Visibility = Visibility.Visible;
-        ApplyLanguage();
+        ShowContentView(SessionsView);
         RootLayout.Focus(FocusState.Programmatic);
         UpdateSessionUsageView(_usageStore.Snapshot?.Sessions);
+    }
+
+    private void ShowContentView(
+        FrameworkElement visibleView,
+        bool closeGaugeColor = true,
+        Action? beforeShow = null)
+    {
+        if (closeGaugeColor)
+        {
+            CloseGaugeColorWindow();
+        }
+
+        CloseAuxiliaryWindows();
+        beforeShow?.Invoke();
+        foreach (var view in new FrameworkElement[]
+                 {
+                     HudView,
+                     SessionsView,
+                     CreditsView,
+                     StyleView,
+                     SettingsView,
+                     ResetCreditDetailsView
+                 })
+        {
+            view.Visibility = ReferenceEquals(view, visibleView)
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+
+        ApplyLanguage();
     }
 
     private void ConfigureCompactWindow()
@@ -1193,6 +1057,7 @@ public sealed partial class MainWindow : Window
 
         if (!sender.IsVisible)
         {
+            _gaugeAnimator.SetActive(false);
             _sideBarHoverHideTimer?.Stop();
             _sideBarHoverPollTimer?.Stop();
             _isPointerOverSideBarHoverRegion = false;
@@ -1203,6 +1068,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        _gaugeAnimator.SetActive(true);
         ApplySideBarLayout();
     }
 
@@ -1547,7 +1413,7 @@ public sealed partial class MainWindow : Window
         _shortcutWindow = popup;
         captureButton.KeyDown += (_, keyArgs) =>
         {
-            var keyName = ShortcutKeyName(keyArgs.Key);
+            var keyName = HotkeyKeyMapper.GetKeyName((uint)keyArgs.Key);
             if (keyName is null)
             {
                 return;
@@ -1677,40 +1543,6 @@ public sealed partial class MainWindow : Window
     private static bool IsKeyDown(VirtualKey key) =>
         (InputKeyboardSource.GetKeyStateForCurrentThread(key) & CoreVirtualKeyStates.Down) != 0;
 
-    private static string? ShortcutKeyName(VirtualKey key)
-    {
-        var value = (int)key;
-        if (value is >= 0x30 and <= 0x39 || value is >= 0x41 and <= 0x5A)
-        {
-            return ((char)value).ToString();
-        }
-
-        if (value is >= 0x70 and <= 0x87)
-        {
-            return $"F{value - 0x70 + 1}";
-        }
-
-        return value switch
-        {
-            0x20 => "Space",
-            0x1B => "Escape",
-            0x09 => "Tab",
-            0x0D => "Enter",
-            0x08 => "Backspace",
-            0x2D => "Insert",
-            0x2E => "Delete",
-            0x24 => "Home",
-            0x23 => "End",
-            0x21 => "PageUp",
-            0x22 => "PageDown",
-            0x26 => "Up",
-            0x28 => "Down",
-            0x25 => "Left",
-            0x27 => "Right",
-            _ => null
-        };
-    }
-
     private void CloseGaugeColorWindow(bool discardPendingColor = true)
     {
         if (discardPendingColor)
@@ -1831,8 +1663,6 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var popup = new Window { Title = Text("Gauge color", "\uAC8C\uC774\uC9C0 \uC0C9\uC0C1") };
-        _gaugeColorWindow = popup;
         var brightnessValue = Math.Max(_previewGaugeColor.R, Math.Max(_previewGaugeColor.G, _previewGaugeColor.B)) / 255d;
         var baseColor = NormalizeGaugeColorBrightness(_previewGaugeColor);
         var candidateColor = _previewGaugeColor;
@@ -1975,57 +1805,16 @@ public sealed partial class MainWindow : Window
         buttons.Children.Add(applyButton);
         buttons.Children.Add(closeButton);
         panel.Children.Add(buttons);
-        popup.Content = new Border
-        {
-            Padding = new Thickness(10),
-            Background = Brush(0xFF, 0x1F, 0x1C, 0x24),
-            BorderBrush = Brush(0x99, 0x7D, 0x62, 0xC7),
-            BorderThickness = new Thickness(1),
-            Child = panel
-        };
-        OwnedWindowBehavior.Attach(popup, this);
-
-        popup.AppWindow.IsShownInSwitchers = false;
-        if (popup.AppWindow.Presenter is OverlappedPresenter presenter)
-        {
-            presenter.SetBorderAndTitleBar(hasBorder: true, hasTitleBar: false);
-            presenter.IsAlwaysOnTop = true;
-            presenter.IsMaximizable = false;
-            presenter.IsMinimizable = false;
-            presenter.IsResizable = false;
-        }
-
-        var popupScale = RootLayout.XamlRoot?.RasterizationScale ?? 1d;
-        var popupWidth = (int)Math.Ceiling(240 * popupScale);
-        var popupHeight = (int)Math.Ceiling(190 * popupScale);
-        popup.AppWindow.ResizeClient(new SizeInt32(popupWidth, popupHeight));
-        var displayArea = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Nearest);
-        var workArea = displayArea.WorkArea;
-        var popupX = AppWindow.Position.X + AppWindow.Size.Width + 8;
-        if (popupX + popupWidth > workArea.X + workArea.Width)
-        {
-            popupX = AppWindow.Position.X - popupWidth - 8;
-        }
-
-        popupX = Math.Clamp(popupX, workArea.X, workArea.X + workArea.Width - popupWidth);
-        var popupY = Math.Clamp(
-            AppWindow.Position.Y + 88,
-            workArea.Y,
-            workArea.Y + workArea.Height - popupHeight);
-        popup.AppWindow.Move(new PointInt32(popupX, popupY));
-        var hasActivated = false;
-        popup.Activated += (_, args) =>
-        {
-            if (args.WindowActivationState == WindowActivationState.Deactivated
-                && hasActivated
-                && ReferenceEquals(_gaugeColorWindow, popup))
-            {
-                CloseCandidateColor(keepCandidate: false);
-                return;
-            }
-
-            hasActivated = true;
-        };
+        var popup = OwnedPopupWindow.Create(
+            this,
+            Text("Gauge color", "\uAC8C\uC774\uC9C0 \uC0C9\uC0C1"),
+            panel,
+            PopupScale,
+            logicalWidth: 240,
+            logicalHeight: 190,
+            verticalOffset: 88,
+            onDeactivated: () => CloseCandidateColor(keepCandidate: false));
+        _gaugeColorWindow = popup;
         popup.Closed += (_, _) =>
         {
             var closedWithoutAction = ReferenceEquals(_gaugeColorWindow, popup) && !isClosingColorWindow;

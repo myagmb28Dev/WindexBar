@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using static WindexBar.Core.Providers.Codex.JsonElementValueReader;
 using WindexBar.Core.Models;
 
 namespace WindexBar.Core.Providers.Codex;
@@ -7,38 +8,6 @@ namespace WindexBar.Core.Providers.Codex;
 public static class CodexUsageMapper
 {
     private static readonly string[] ModelContainerKeys = ["models", "modelLimits", "modelRateLimits", "rateLimitsByModel"];
-    private static readonly string[] ReasoningSuffixes =
-    [
-        " ultra reasoning effort",
-        " max reasoning effort",
-        " ultra reasoning",
-        " max reasoning",
-        " extra high reasoning effort",
-        " extra high reasoning",
-        " xhigh reasoning effort",
-        " xhigh reasoning",
-        " high reasoning effort",
-        " high reasoning",
-        " medium reasoning effort",
-        " medium reasoning",
-        " low reasoning effort",
-        " low reasoning",
-        " minimal reasoning effort",
-        " minimal reasoning",
-        " no reasoning",
-        " none reasoning",
-        " extra high",
-        " ultra",
-        " max",
-        " xhigh",
-        " high",
-        " medium",
-        " low",
-        " minimal",
-        " none",
-        " reasoning effort",
-        " reasoning"
-    ];
 
     public static UsageSnapshot? MapUsage(RpcRateLimitsResponse response, RpcAccountResponse? account, DateTimeOffset now)
     {
@@ -47,30 +16,10 @@ public static class CodexUsageMapper
         var resetCredits = MapRateLimitResetCredits(response.RateLimitResetCredits, now);
         if (usage is null)
         {
-            return resetCredits is null ? null : new UsageSnapshot(null, null, null, now, null, RateLimitResetCredits: resetCredits);
+            return resetCredits is null ? null : new UsageSnapshot(null, null, now, null, RateLimitResetCredits: resetCredits);
         }
 
         return usage with { RateLimitResetCredits = resetCredits };
-    }
-
-    internal static UsageSnapshot WithMergedModels(UsageSnapshot usage, IReadOnlyList<ModelUsageSnapshot> additionalModels)
-    {
-        if (additionalModels.Count == 0)
-        {
-            return usage;
-        }
-
-        var models = MergeModelUsages(usage.Models, additionalModels);
-        var mappedWindows = models
-            .SelectMany(model => new[] { model.Current, model.Weekly })
-            .Where(window => window is not null)
-            .Cast<RateWindow>()
-            .ToArray();
-
-        var primary = usage.Primary ?? models.Select(model => model.Current).FirstOrDefault(window => window is not null);
-        var secondary = usage.Secondary ?? models.Select(model => model.Weekly).FirstOrDefault(window => window is not null);
-        var tertiary = usage.Tertiary ?? mappedWindows.FirstOrDefault(window => !Equals(window, primary) && !Equals(window, secondary));
-        return usage with { Primary = primary, Secondary = secondary, Tertiary = tertiary, Models = models };
     }
 
     public static UsageSnapshot? MapUsage(RpcRateLimitSnapshot limits, RpcAccountResponse? account, DateTimeOffset now)
@@ -88,19 +37,11 @@ public static class CodexUsageMapper
 
         var rootWindows = MapCanonicalWindows(rootLimits);
         var models = MapLimitBuckets(buckets);
-        var mappedWindows = models
-            .SelectMany(model => new[] { model.Current, model.Weekly })
-            .Where(window => window is not null)
-            .Cast<RateWindow>()
-            .ToArray();
-
         var primary = rootWindows.Current ?? models.Select(model => model.Current).FirstOrDefault(window => window is not null);
         var secondary = rootWindows.Weekly ?? models.Select(model => model.Weekly).FirstOrDefault(window => window is not null);
-        var tertiary = mappedWindows.FirstOrDefault(window => !Equals(window, primary) && !Equals(window, secondary));
 
         if (primary is null
             && secondary is null
-            && tertiary is null
             && models.Count == 0
             && identity.AccountEmail is null
             && identity.LoginMethod is null)
@@ -108,7 +49,7 @@ public static class CodexUsageMapper
             return null;
         }
 
-        return new UsageSnapshot(primary, secondary, tertiary, now, identity, models);
+        return new UsageSnapshot(primary, secondary, now, identity, models);
     }
 
     private static IEnumerable<CodexLimitBucket> EnumerateLimitBuckets(
@@ -132,9 +73,7 @@ public static class CodexUsageMapper
     {
         var accountDetails = account?.Account;
         return new ProviderIdentitySnapshot(
-            UsageProvider.Codex,
             IsAccountType(accountDetails?.Type, "chatgpt") ? NormalizeField(accountDetails?.Email) : null,
-            null,
             NormalizeField(accountDetails?.PlanType) ?? NormalizeField(limits.PlanType));
     }
 
@@ -148,7 +87,7 @@ public static class CodexUsageMapper
         var remaining = double.TryParse(credits.Balance, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
             ? value
             : 0;
-        return new CreditsSnapshot(remaining, Array.Empty<CreditEvent>(), now);
+        return new CreditsSnapshot(remaining, now);
     }
 
     public static RateLimitResetCreditsSnapshot? MapRateLimitResetCredits(
@@ -229,29 +168,7 @@ public static class CodexUsageMapper
         var resetsAt = window.ResetsAt.HasValue
             ? DateTimeOffset.FromUnixTimeSeconds(window.ResetsAt.Value)
             : (DateTimeOffset?)null;
-        var resetDescription = resetsAt.HasValue ? ResetDescription(resetsAt.Value) : null;
-        return new RateWindow(window.UsedPercent, window.WindowDurationMins, resetsAt, resetDescription);
-    }
-
-    public static string ResetDescription(DateTimeOffset resetsAt)
-    {
-        var delta = resetsAt - DateTimeOffset.Now;
-        if (delta.TotalSeconds <= 0)
-        {
-            return "now";
-        }
-
-        if (delta.TotalHours >= 24)
-        {
-            return $"in {(int)Math.Round(delta.TotalDays)}d";
-        }
-
-        if (delta.TotalHours >= 1)
-        {
-            return $"in {(int)Math.Round(delta.TotalHours)}h";
-        }
-
-        return $"in {Math.Max(1, (int)Math.Round(delta.TotalMinutes))}m";
+        return new RateWindow(window.UsedPercent, window.WindowDurationMins, resetsAt);
     }
 
     private static IReadOnlyList<ModelUsageSnapshot> MapModelUsages(
@@ -360,20 +277,11 @@ public static class CodexUsageMapper
     private static string ResolveLimitModelName(string rawKey, RpcRateLimitSnapshot bucket)
     {
         var rawName = FirstNonBlank(bucket.LimitName, bucket.LimitId, rawKey, "Codex");
-        return FormatModelName(StripLimitSuffix(rawName));
+        return CodexModelNaming.FormatModelName(StripLimitSuffix(rawName));
     }
 
     private static bool IsSameModelName(string lhs, string rhs) =>
-        string.Equals(NormalizeModelKey(lhs), NormalizeModelKey(rhs), StringComparison.OrdinalIgnoreCase);
-
-    private static string NormalizeModelKey(string value)
-    {
-        var chars = StripReasoningSuffix(value)
-            .Where(char.IsLetterOrDigit)
-            .Select(char.ToLowerInvariant)
-            .ToArray();
-        return new string(chars);
-    }
+        string.Equals(CodexModelNaming.NormalizeModelKey(lhs), CodexModelNaming.NormalizeModelKey(rhs), StringComparison.OrdinalIgnoreCase);
 
     private static string StripLimitSuffix(string rawName)
     {
@@ -389,40 +297,12 @@ public static class CodexUsageMapper
         return trimmed;
     }
 
-    private static string StripReasoningSuffix(string rawName)
-    {
-        var trimmed = rawName.Replace('_', ' ').Replace('-', ' ').Trim();
-        if (string.IsNullOrWhiteSpace(trimmed))
-        {
-            return trimmed;
-        }
-
-        var changed = true;
-        while (changed)
-        {
-            changed = false;
-            foreach (var suffix in ReasoningSuffixes)
-            {
-                if (!trimmed.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                trimmed = trimmed[..^suffix.Length].Trim();
-                changed = true;
-                break;
-            }
-        }
-
-        return trimmed;
-    }
-
     private static void AddModelUsage(List<ModelUsageBuilder> builders, string rawKey, JsonElement source)
     {
         if (TryMapWindow(source, out var directWindow))
         {
             var kind = ResolveWindowKind(rawKey, directWindow);
-            var modelName = FormatModelName(StripWindowSuffix(rawKey));
+            var modelName = CodexModelNaming.FormatModelName(StripWindowSuffix(rawKey));
             ApplyWindow(GetOrAddModel(builders, modelName), kind, directWindow);
             return;
         }
@@ -466,7 +346,7 @@ public static class CodexUsageMapper
             return;
         }
 
-        var model = GetOrAddModel(builders, FormatModelName(rawKey));
+        var model = GetOrAddModel(builders, CodexModelNaming.FormatModelName(rawKey));
         foreach (var property in sourceObject)
         {
             if (TryMapWindow(property.Value, out var window))
@@ -615,92 +495,6 @@ public static class CodexUsageMapper
         return trimmed;
     }
 
-    internal static string FormatModelName(string rawName)
-    {
-        var normalized = rawName.Replace('_', ' ').Replace('-', ' ').Trim();
-        if (string.IsNullOrWhiteSpace(normalized))
-        {
-            return "Codex";
-        }
-
-        var words = normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
-        if (words.Count >= 2
-            && string.Equals(words[0], "gpt", StringComparison.OrdinalIgnoreCase)
-            && char.IsDigit(words[1][0]))
-        {
-            words[0] = $"GPT-{words[1]}";
-            words.RemoveAt(1);
-        }
-
-        NormalizeReasoningDisplayWords(words);
-        return string.Join(" ", words.Select(FormatModelWord));
-    }
-
-    private static void NormalizeReasoningDisplayWords(List<string> words)
-    {
-        while (words.Count > 0
-            && (
-                string.Equals(words[^1], "reasoning", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(words[^1], "effort", StringComparison.OrdinalIgnoreCase)))
-        {
-            words.RemoveAt(words.Count - 1);
-        }
-
-        if (words.Count >= 2
-            && string.Equals(words[^2], "extra", StringComparison.OrdinalIgnoreCase)
-            && string.Equals(words[^1], "high", StringComparison.OrdinalIgnoreCase))
-        {
-            words.RemoveAt(words.Count - 1);
-            words[^1] = "xhigh";
-        }
-    }
-
-    private static string FormatModelWord(string word)
-    {
-        if (word.StartsWith("GPT-", StringComparison.OrdinalIgnoreCase))
-        {
-            return "GPT-" + word[4..];
-        }
-
-        if (string.Equals(word, "gpt", StringComparison.OrdinalIgnoreCase))
-        {
-            return "GPT";
-        }
-
-        if (string.Equals(word, "codex", StringComparison.OrdinalIgnoreCase))
-        {
-            return "Codex";
-        }
-
-        if (string.Equals(word, "spark", StringComparison.OrdinalIgnoreCase))
-        {
-            return "Spark";
-        }
-
-        if (string.Equals(word, "xhigh", StringComparison.OrdinalIgnoreCase))
-        {
-            return "XHigh";
-        }
-
-        if (word.All(character => !char.IsLetter(character)))
-        {
-            return word;
-        }
-
-        return char.ToUpperInvariant(word[0]) + word[1..].ToLowerInvariant();
-    }
-
-    private static IEnumerable<RateWindow> MapExtraWindows(RpcRateLimitSnapshot limits)
-    {
-        foreach (var extraWindow in limits.UnknownWindows())
-        {
-            if (TryMapWindow(extraWindow.Value, out var window))
-            {
-                yield return window;
-            }
-        }
-    }
-
     private static bool TryMapWindow(JsonElement source, out RateWindow window)
     {
         if (!source.ValueKind.Equals(JsonValueKind.Object))
@@ -729,8 +523,7 @@ public static class CodexUsageMapper
         TryGetLong(source, "resetsAt", out resetsAtUnix);
 
         DateTimeOffset? resetsAt = resetsAtUnix is null ? null : DateTimeOffset.FromUnixTimeSeconds(resetsAtUnix.Value);
-        var resetDescription = resetsAt.HasValue ? ResetDescription(resetsAt.Value) : null;
-        window = new RateWindow(usedPercent, windowMinutes, resetsAt, resetDescription);
+        window = new RateWindow(usedPercent, windowMinutes, resetsAt);
         return true;
     }
 
@@ -797,38 +590,6 @@ public static class CodexUsageMapper
         }
 
         value = default;
-        return false;
-    }
-
-    private static bool TryReadDouble(JsonElement value, out double result)
-    {
-        if (value.ValueKind is JsonValueKind.Number)
-        {
-            return value.TryGetDouble(out result);
-        }
-
-        if (value.ValueKind is JsonValueKind.String)
-        {
-            return double.TryParse(value.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out result);
-        }
-
-        result = 0;
-        return false;
-    }
-
-    private static bool TryReadInt64(JsonElement value, out long result)
-    {
-        if (value.ValueKind is JsonValueKind.Number)
-        {
-            return value.TryGetInt64(out result);
-        }
-
-        if (value.ValueKind is JsonValueKind.String)
-        {
-            return long.TryParse(value.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out result);
-        }
-
-        result = 0;
         return false;
     }
 

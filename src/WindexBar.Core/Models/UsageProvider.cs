@@ -12,17 +12,5 @@ public static class UsageProviderNames
         UsageProvider.Codex => "codex",
         _ => throw new ArgumentOutOfRangeException(nameof(provider), provider, null)
     };
-
-    public static bool TryParse(string? value, out UsageProvider provider)
-    {
-        if (string.Equals(value, "codex", StringComparison.OrdinalIgnoreCase))
-        {
-            provider = UsageProvider.Codex;
-            return true;
-        }
-
-        provider = default;
-        return false;
-    }
 }
 

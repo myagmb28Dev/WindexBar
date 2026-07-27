@@ -1,26 +1,11 @@
-using System.Globalization;
-using System.Text.RegularExpressions;
-
 namespace WindexBar.Core.Updates;
 
-public readonly partial record struct CodexCliVersion(int Major, int Minor, int Patch) : IComparable<CodexCliVersion>
+public readonly record struct CodexCliVersion(int Major, int Minor, int Patch) : IComparable<CodexCliVersion>
 {
-    [GeneratedRegex(@"(?<!\d)(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)(?!\d)", RegexOptions.CultureInvariant)]
-    private static partial Regex VersionPattern();
-
     public static bool TryParse(string? value, out CodexCliVersion version)
     {
         version = default;
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return false;
-        }
-
-        var match = VersionPattern().Match(value);
-        if (!match.Success
-            || !int.TryParse(match.Groups["major"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var major)
-            || !int.TryParse(match.Groups["minor"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var minor)
-            || !int.TryParse(match.Groups["patch"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var patch))
+        if (!SemanticVersionParser.TryParse(value, true, out var major, out var minor, out var patch))
         {
             return false;
         }
@@ -29,17 +14,8 @@ public readonly partial record struct CodexCliVersion(int Major, int Minor, int 
         return true;
     }
 
-    public int CompareTo(CodexCliVersion other)
-    {
-        var major = Major.CompareTo(other.Major);
-        if (major != 0)
-        {
-            return major;
-        }
-
-        var minor = Minor.CompareTo(other.Minor);
-        return minor != 0 ? minor : Patch.CompareTo(other.Patch);
-    }
+    public int CompareTo(CodexCliVersion other) =>
+        SemanticVersionParser.Compare(Major, Minor, Patch, other.Major, other.Minor, other.Patch);
 
     public static bool operator <(CodexCliVersion left, CodexCliVersion right) => left.CompareTo(right) < 0;
     public static bool operator >(CodexCliVersion left, CodexCliVersion right) => left.CompareTo(right) > 0;

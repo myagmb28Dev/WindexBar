@@ -3,10 +3,14 @@ setlocal
 
 set "ROOT=%~dp0"
 set "APP_VERSION=%~1"
-if not defined APP_VERSION set "APP_VERSION=1.0.0"
+if not defined APP_VERSION for /f "usebackq delims=" %%V in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$xml = [xml](Get-Content -Raw '%ROOT%Directory.Build.props'); $xml.Project.PropertyGroup.Version.InnerText"`) do set "APP_VERSION=%%V"
+if not defined APP_VERSION (
+    echo Version was not found in Directory.Build.props.
+    exit /b 1
+)
 set "PUBLISH_ROOT=%ROOT%artifacts\publish"
 set "ISS_FILE=%ROOT%installer\WindexBar.iss"
-set "SETUP_ICON=%ROOT%src\WindexBar.Windows\Assets\TrayIcon.ico"
+set "SETUP_ICON=%ROOT%src\WindexBar.Windows\Assets\AppIcon.ico"
 for /f "usebackq delims=" %%T in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Date -Format 'yyyyMMdd-HHmmss'"`) do set "BUILD_STAMP=%%T"
 set "PUBLISH_DIR=%PUBLISH_ROOT%\%BUILD_STAMP%\win-x64"
 set "INSTALLER_DIR=%ROOT%artifacts\installer\%BUILD_STAMP%"

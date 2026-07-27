@@ -2,6 +2,7 @@ using System.Globalization;
 using WindexBar.Core.Config;
 using WindexBar.Core.Formatting;
 using WindexBar.Core.Models;
+using WindexBar.Core.Presentation;
 using WindexBar.Core.Refresh;
 using WindexBar.Core.Windowing;
 using WindexBar.Core.Updates;
@@ -493,7 +494,7 @@ public sealed class TrayIconService : IDisposable
 
     private static string? TooltipTokenText(TokenUsageSnapshot? tokenUsage, string language)
     {
-        var contextPercent = TokenContextPercent(tokenUsage);
+        var contextPercent = SessionListViewModelFactory.TokenContextPercent(tokenUsage);
         if (contextPercent is not null)
         {
             return IsKorean(language)
@@ -512,47 +513,18 @@ public sealed class TrayIconService : IDisposable
     private static string? TooltipResetCreditsText(RateLimitResetCreditsSnapshot? resetCredits, string language) =>
         resetCredits is null ? null : RateLimitResetCreditFormatter.FormatCompact(resetCredits, language);
 
-    private static double? TokenContextPercent(TokenUsageSnapshot? tokenUsage)
-    {
-        var current = tokenUsage?.Last ?? tokenUsage?.Total;
-        if (current is null || tokenUsage?.ModelContextWindow is not { } contextWindow || contextWindow <= 0)
-        {
-            return null;
-        }
-
-        return Math.Clamp(current.TotalTokens * 100d / contextWindow, 0, 100);
-    }
-
     private static Drawing.Icon LoadIcon()
     {
-        foreach (var fileName in new[] { "TrayIcon.ico", "AppIcon.ico" })
+        var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
+        if (File.Exists(iconPath))
         {
-            var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", fileName);
-            if (File.Exists(iconPath))
-            {
-                return new Drawing.Icon(iconPath);
-            }
+            return new Drawing.Icon(iconPath);
         }
 
         return Drawing.SystemIcons.Application;
     }
 
-    private static void LogMessage(string message, Exception? error = null)
-    {
-        try
-        {
-            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            var logDir = Path.Combine(appData, "WindexBar");
-            Directory.CreateDirectory(logDir);
-            var detail = error is null ? string.Empty : $"{Environment.NewLine}{error}";
-            File.AppendAllText(
-                Path.Combine(logDir, "windexbar.log"),
-                $"[{DateTimeOffset.Now:O}] {message}{detail}{Environment.NewLine}");
-        }
-        catch
-        {
-        }
-    }
+    private static void LogMessage(string message, Exception? error = null) => AppLog.Write(message, error);
 
     public void Dispose()
     {

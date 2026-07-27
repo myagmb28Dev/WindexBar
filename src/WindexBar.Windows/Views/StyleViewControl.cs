@@ -31,11 +31,7 @@ internal sealed class StyleViewControl : UserControl
             FontSize = 16,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
         };
-        TitleText.PointerPressed += (_, args) =>
-        {
-            HomeRequested?.Invoke(this, EventArgs.Empty);
-            args.Handled = true;
-        };
+        FeatureViewHelpers.AttachHomeNavigation(TitleText, () => HomeRequested?.Invoke(this, EventArgs.Empty));
         content.Children.Add(TitleText);
         content.Children.Add(FeatureViewHelpers.CreateDivider());
 

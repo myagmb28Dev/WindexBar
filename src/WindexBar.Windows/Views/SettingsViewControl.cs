@@ -6,6 +6,9 @@ namespace WindexBar.Windows.Views;
 
 internal sealed class SettingsViewControl : UserControl
 {
+    private const double ShortcutControlWidth = 100;
+    private const double ShortcutColumnSpacing = 12;
+
     public SettingsViewControl(Button quitButton)
     {
         var root = new Grid { RowSpacing = 8 };
@@ -20,7 +23,7 @@ internal sealed class SettingsViewControl : UserControl
         root.Children.Add(ScrollViewer);
 
         var grid = new Grid { RowSpacing = 9 };
-        for (var row = 0; row < 11; row++)
+        for (var row = 0; row < 10; row++)
         {
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         }
@@ -32,26 +35,13 @@ internal sealed class SettingsViewControl : UserControl
             FontSize = 16,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
         };
-        TitleText.PointerPressed += (_, args) =>
-        {
-            HomeRequested?.Invoke(this, EventArgs.Empty);
-            args.Handled = true;
-        };
+        FeatureViewHelpers.AttachHomeNavigation(TitleText, () => HomeRequested?.Invoke(this, EventArgs.Empty));
         grid.Children.Add(TitleText);
         var divider = FeatureViewHelpers.CreateDivider();
         Grid.SetRow(divider, 1);
         grid.Children.Add(divider);
 
-        var intervalGrid = CreateTwoColumnRow(grid, 2, new GridLength(72), includeSuffix: true);
-        RefreshIntervalLabelText = AddLabel(intervalGrid, "Refresh interval");
-        RefreshIntervalSecondsTextBox = new TextBox { TextAlignment = TextAlignment.Right };
-        Grid.SetColumn(RefreshIntervalSecondsTextBox, 1);
-        intervalGrid.Children.Add(RefreshIntervalSecondsTextBox);
-        SecondsLabelText = new TextBlock { Text = "s", VerticalAlignment = VerticalAlignment.Center };
-        Grid.SetColumn(SecondsLabelText, 2);
-        intervalGrid.Children.Add(SecondsLabelText);
-
-        var languageGrid = CreateTwoColumnRow(grid, 3, new GridLength(124));
+        var languageGrid = CreateTwoColumnRow(grid, 2, new GridLength(124));
         LanguageLabelText = AddLabel(languageGrid, "Language");
         LanguageComboBox = new ComboBox { HorizontalAlignment = HorizontalAlignment.Right, MinWidth = 124 };
         LanguageComboBox.Items.Add(new ComboBoxItem { Content = "English", Tag = "en" });
@@ -59,7 +49,11 @@ internal sealed class SettingsViewControl : UserControl
         Grid.SetColumn(LanguageComboBox, 1);
         languageGrid.Children.Add(LanguageComboBox);
 
-        var hotkeyGrid = CreateTwoColumnRow(grid, 4, new GridLength(124));
+        var hotkeyGrid = CreateTwoColumnRow(
+            grid,
+            3,
+            new GridLength(ShortcutControlWidth),
+            ShortcutColumnSpacing);
         ToggleHotkeyLabelText = AddLabel(hotkeyGrid, "Toggle shortcut");
         ToggleHotkeyButton = CreateShortcutButton();
         ToggleHotkeyButton.Click += (_, _) => ShortcutEditRequested?.Invoke(
@@ -68,7 +62,11 @@ internal sealed class SettingsViewControl : UserControl
         Grid.SetColumn(ToggleHotkeyButton, 1);
         hotkeyGrid.Children.Add(ToggleHotkeyButton);
 
-        var sidebarHotkeyGrid = CreateTwoColumnRow(grid, 5, new GridLength(124));
+        var sidebarHotkeyGrid = CreateTwoColumnRow(
+            grid,
+            4,
+            new GridLength(ShortcutControlWidth),
+            ShortcutColumnSpacing);
         ToggleSidebarHotkeyLabelText = AddLabel(sidebarHotkeyGrid, "Sidebar shortcut");
         ToggleSidebarHotkeyButton = CreateShortcutButton();
         ToggleSidebarHotkeyButton.Click += (_, _) => ShortcutEditRequested?.Invoke(
@@ -78,21 +76,21 @@ internal sealed class SettingsViewControl : UserControl
         sidebarHotkeyGrid.Children.Add(ToggleSidebarHotkeyButton);
 
         StartWithWindowsCheckBox = new CheckBox { Content = "Start with Windows" };
-        Grid.SetRow(StartWithWindowsCheckBox, 6);
+        Grid.SetRow(StartWithWindowsCheckBox, 5);
         grid.Children.Add(StartWithWindowsCheckBox);
         AutoShowWithCodexCheckBox = new CheckBox { Content = "Show only while using Codex" };
-        Grid.SetRow(AutoShowWithCodexCheckBox, 7);
+        Grid.SetRow(AutoShowWithCodexCheckBox, 6);
         grid.Children.Add(AutoShowWithCodexCheckBox);
 
         RateLimitAlertsCheckBox = new CheckBox { Content = "Alert at 80% and 90% usage" };
-        Grid.SetRow(RateLimitAlertsCheckBox, 8);
+        Grid.SetRow(RateLimitAlertsCheckBox, 7);
         grid.Children.Add(RateLimitAlertsCheckBox);
 
         SidebarHoverRevealCheckBox = new CheckBox { Content = "Show sidebar on hover" };
-        Grid.SetRow(SidebarHoverRevealCheckBox, 9);
+        Grid.SetRow(SidebarHoverRevealCheckBox, 8);
         grid.Children.Add(SidebarHoverRevealCheckBox);
 
-        var versionGrid = CreateTwoColumnRow(grid, 10, GridLength.Auto);
+        var versionGrid = CreateTwoColumnRow(grid, 9, GridLength.Auto);
         CurrentCodexVersionText = new TextBlock
         {
             TextWrapping = TextWrapping.Wrap,
@@ -189,12 +187,9 @@ internal sealed class SettingsViewControl : UserControl
     public event EventHandler? UpdateDetailsRequested;
     public ScrollViewer ScrollViewer { get; }
     public TextBlock TitleText { get; }
-    public TextBlock RefreshIntervalLabelText { get; }
-    public TextBlock SecondsLabelText { get; }
     public TextBlock LanguageLabelText { get; }
     public TextBlock ToggleHotkeyLabelText { get; }
     public TextBlock ToggleSidebarHotkeyLabelText { get; }
-    public TextBox RefreshIntervalSecondsTextBox { get; }
     public Button ToggleHotkeyButton { get; }
     public Button ToggleSidebarHotkeyButton { get; }
     public ComboBox LanguageComboBox { get; }
@@ -220,15 +215,15 @@ internal sealed class SettingsViewControl : UserControl
     private void AddInstallMethod(string label, string value) =>
         CodexInstallMethodComboBox.Items.Add(new ComboBoxItem { Content = label, Tag = value });
 
-    private static Grid CreateTwoColumnRow(Grid parent, int row, GridLength secondWidth, bool includeSuffix = false)
+    private static Grid CreateTwoColumnRow(
+        Grid parent,
+        int row,
+        GridLength secondWidth,
+        double columnSpacing = 8)
     {
-        var result = new Grid { ColumnSpacing = 8 };
+        var result = new Grid { ColumnSpacing = columnSpacing };
         result.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         result.ColumnDefinitions.Add(new ColumnDefinition { Width = secondWidth });
-        if (includeSuffix)
-        {
-            result.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        }
         Grid.SetRow(result, row);
         parent.Children.Add(result);
         return result;
@@ -245,8 +240,9 @@ internal sealed class SettingsViewControl : UserControl
     {
         HorizontalAlignment = HorizontalAlignment.Stretch,
         HorizontalContentAlignment = HorizontalAlignment.Right,
-        MinWidth = 124,
-        Padding = new Thickness(8, 3, 8, 3)
+        MinWidth = ShortcutControlWidth,
+        Padding = new Thickness(6, 3, 6, 3),
+        FontSize = 12
     };
 }
 

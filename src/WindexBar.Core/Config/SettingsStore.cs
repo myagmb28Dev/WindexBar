@@ -24,20 +24,6 @@ public sealed class SettingsStore
         Save();
     }
 
-    public void UpdateCodex(Action<ProviderConfig> mutate)
-    {
-        var codex = Config.GetProviderConfig(UsageProvider.Codex);
-        mutate(codex);
-        Config.SetProviderConfig(codex);
-        Save();
-    }
-
-    public void Reload()
-    {
-        Config = _store.LoadOrCreateDefault();
-        OnChanged();
-    }
-
     public void Save()
     {
         Persist();

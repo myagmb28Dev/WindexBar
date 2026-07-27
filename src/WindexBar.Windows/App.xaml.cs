@@ -229,19 +229,5 @@ public partial class App : WinApplication
         }
     }
 
-    private static void LogMessage(string message)
-    {
-        try
-        {
-            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            var logDir = Path.Combine(appData, "WindexBar");
-            Directory.CreateDirectory(logDir);
-            File.AppendAllText(
-                Path.Combine(logDir, "windexbar.log"),
-                $"[{DateTimeOffset.Now:O}] {message}{Environment.NewLine}");
-        }
-        catch
-        {
-        }
-    }
+    private static void LogMessage(string message) => AppLog.Write(message);
 }

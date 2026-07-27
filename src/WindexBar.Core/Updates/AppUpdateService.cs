@@ -1,36 +1,16 @@
-using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using WindexBar.Core.Config;
 
 namespace WindexBar.Core.Updates;
 
-public readonly partial record struct AppVersion(int Major, int Minor, int Patch) : IComparable<AppVersion>
+public readonly record struct AppVersion(int Major, int Minor, int Patch) : IComparable<AppVersion>
 {
-    [GeneratedRegex(@"(?<!\d)(?<major>\d+)\.(?<minor>\d+)(?:\.(?<patch>\d+))?(?!\d)")]
-    private static partial Regex VersionPattern();
-
     public static bool TryParse(string? value, out AppVersion version)
     {
         version = default;
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return false;
-        }
-
-        var match = VersionPattern().Match(value);
-        if (!match.Success
-            || !int.TryParse(match.Groups["major"].Value, CultureInfo.InvariantCulture, out var major)
-            || !int.TryParse(match.Groups["minor"].Value, CultureInfo.InvariantCulture, out var minor))
-        {
-            return false;
-        }
-
-        var patch = 0;
-        if (match.Groups["patch"].Success
-            && !int.TryParse(match.Groups["patch"].Value, CultureInfo.InvariantCulture, out patch))
+        if (!SemanticVersionParser.TryParse(value, false, out var major, out var minor, out var patch))
         {
             return false;
         }
@@ -39,13 +19,8 @@ public readonly partial record struct AppVersion(int Major, int Minor, int Patch
         return true;
     }
 
-    public int CompareTo(AppVersion other)
-    {
-        var major = Major.CompareTo(other.Major);
-        if (major != 0) return major;
-        var minor = Minor.CompareTo(other.Minor);
-        return minor != 0 ? minor : Patch.CompareTo(other.Patch);
-    }
+    public int CompareTo(AppVersion other) =>
+        SemanticVersionParser.Compare(Major, Minor, Patch, other.Major, other.Minor, other.Patch);
 
     public override string ToString() => $"{Major}.{Minor}.{Patch}";
 
