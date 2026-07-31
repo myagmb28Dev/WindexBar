@@ -49,6 +49,7 @@ public sealed class WeeklyLimitImpactStateStore(string? filePath = null) : IWeek
 public sealed class WeeklyLimitImpactTracker
 {
     private const double PercentTolerance = 0.0001;
+    private static readonly TimeSpan ResetScheduleTolerance = TimeSpan.FromHours(1);
     private readonly IWeeklyLimitImpactStateStore _store;
     private WeeklyLimitImpactState _state;
 
@@ -79,10 +80,23 @@ public sealed class WeeklyLimitImpactTracker
                 group => group.Key,
                 group => SessionTotalTokens(group.OrderByDescending(session => session.UpdatedAt).First()),
                 StringComparer.OrdinalIgnoreCase);
+        var windowRolledOver = HasWindowRolledOver(
+            _state.WindowResetsAt,
+            weekly.ResetsAt,
+            snapshot.UpdatedAt);
+        var resetScheduleChanged = _state.LastUsedPercent is { } previousUsedPercent
+            && HasResetScheduleChangedAfterUsageDrop(
+                _state.WindowResetsAt,
+                weekly.ResetsAt,
+                snapshot.UpdatedAt,
+                previousUsedPercent,
+                weekly.UsedPercent);
         if (!string.Equals(_state.WindowId, windowId, StringComparison.Ordinal)
             || _state.LastUsedPercent is null
-            || HasWindowRolledOver(_state.WindowResetsAt, weekly.ResetsAt, snapshot.UpdatedAt))
+            || windowRolledOver
+            || resetScheduleChanged)
         {
+            var previousState = _state;
             _state = new WeeklyLimitImpactState
             {
                 WindowId = windowId,
@@ -90,6 +104,10 @@ public sealed class WeeklyLimitImpactTracker
                 LastUsedPercent = weekly.UsedPercent,
                 LastSessionTokens = currentTokens
             };
+            if (resetScheduleChanged)
+            {
+                AttributeFreshWindowImpact(previousState, currentTokens, weekly.UsedPercent);
+            }
             _store.Save(_state);
             return WithImpacts(snapshot, sessions);
         }
@@ -162,6 +180,38 @@ public sealed class WeeklyLimitImpactTracker
         }
     }
 
+    private void AttributeFreshWindowImpact(
+        WeeklyLimitImpactState previousState,
+        IReadOnlyDictionary<string, long> currentTokens,
+        double usedPercent)
+    {
+        if (usedPercent <= PercentTolerance || currentTokens.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var (sessionId, totalTokens) in currentTokens)
+        {
+            if (previousState.LastSessionTokens.TryGetValue(sessionId, out var previousTokens)
+                && totalTokens > previousTokens)
+            {
+                Add(_state.PendingSessionTokens, sessionId, totalTokens - previousTokens);
+            }
+        }
+
+        if (HasPendingSessionTokens())
+        {
+            AttributeImpact(usedPercent);
+            _state.PendingSessionTokens.Clear();
+            return;
+        }
+
+        if (currentTokens.Count == 1)
+        {
+            _state.SessionImpacts[currentTokens.Keys.Single()] = usedPercent;
+        }
+    }
+
     private bool HasPendingSessionTokens() =>
         _state.PendingSessionTokens.Any(item => item.Value > 0);
 
@@ -194,6 +244,18 @@ public sealed class WeeklyLimitImpactTracker
         && currentReset is { } current
         && observedAt >= previous
         && current > previous;
+
+    private static bool HasResetScheduleChangedAfterUsageDrop(
+        DateTimeOffset? previousReset,
+        DateTimeOffset? currentReset,
+        DateTimeOffset observedAt,
+        double previousUsedPercent,
+        double currentUsedPercent) =>
+        previousReset is { } previous
+        && currentReset is { } current
+        && observedAt < previous
+        && previousUsedPercent - currentUsedPercent > PercentTolerance
+        && (current - previous).Duration() > ResetScheduleTolerance;
 
     private static long SessionTotalTokens(CodexSessionUsageSnapshot session) =>
         session.TokenUsage.Total?.TotalTokens

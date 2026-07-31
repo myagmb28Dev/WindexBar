@@ -23,6 +23,8 @@ public partial class App : WinApplication
     public App()
     {
         InitializeComponent();
+        UnhandledException += (_, args) =>
+            AppLog.Write("Unhandled WinUI exception.", args.Exception);
         LogMessage("App constructed.");
     }
 
@@ -75,8 +77,8 @@ public partial class App : WinApplication
             CodexCliUpdateService,
             DispatcherQueue.GetForCurrentThread());
         LogMessage("Tray icon service created.");
-        TrayIconService.ShowStatusWindow();
-        LogMessage("ShowStatusWindow call completed.");
+        TrayIconService.Start();
+        LogMessage("Tray icon service started.");
         _initialized = true;
         HandlePreviousAppUpdate();
         _appUpdateCancellation = new CancellationTokenSource();

@@ -28,6 +28,8 @@ public sealed class TrayIconService : IDisposable
     private readonly AutoVisibilityStabilityFilter _autoVisibilityFilter = new(inactiveSamplesBeforeHide: 2);
     private MainWindow? _statusWindow;
     private string? _uiError;
+    private bool _started;
+    private bool _autoVisibilityMonitoringStarted;
     private bool _disposed;
 
     public TrayIconService(
@@ -57,8 +59,22 @@ public sealed class TrayIconService : IDisposable
         RegisterHotkeys();
         _usageStore.Changed += OnUsageChanged;
         _settingsStore.Changed += OnSettingsChanged;
-        ApplyAutoVisibilityMonitoring();
         UpdateTooltip();
+    }
+
+    public void Start()
+    {
+        if (_disposed || _started)
+        {
+            return;
+        }
+
+        _started = true;
+        ShowStatusWindow();
+        if (_statusWindow?.HasCompletedStartup == true)
+        {
+            StartAutoVisibilityMonitoring();
+        }
     }
 
     public void ShowStatusWindow()
@@ -206,6 +222,7 @@ public sealed class TrayIconService : IDisposable
         if (_statusWindow is null)
         {
             _statusWindow = new MainWindow(_usageStore, _settingsStore, _codexCliUpdateService);
+            _statusWindow.StartupCompleted += OnStatusWindowStartupCompleted;
             _statusWindow.Closed += (_, _) =>
             {
                 LogMessage("WindexBar window closed.");
@@ -266,7 +283,11 @@ public sealed class TrayIconService : IDisposable
         _dispatcher.TryEnqueue(() =>
         {
             RegisterHotkeys();
-            ApplyAutoVisibilityMonitoring();
+            if (_autoVisibilityMonitoringStarted)
+            {
+                ApplyAutoVisibilityMonitoring();
+            }
+
             RebuildMenu();
             UpdateTooltip();
         });
@@ -347,6 +368,40 @@ public sealed class TrayIconService : IDisposable
     private void OnCodexActivitySampled(object? sender, bool isActive)
     {
         _dispatcher.TryEnqueue(() => ApplyAutoVisibility(isActive));
+    }
+
+    private void OnStatusWindowStartupCompleted(object? sender, EventArgs args)
+    {
+        if (sender is MainWindow window)
+        {
+            window.StartupCompleted -= OnStatusWindowStartupCompleted;
+        }
+
+        if (_started)
+        {
+            try
+            {
+                StartAutoVisibilityMonitoring();
+            }
+            catch (Exception error)
+            {
+                _uiError = error.Message;
+                LogMessage("Failed to start Codex auto-visibility monitoring.", error);
+                UpdateTooltip();
+            }
+        }
+    }
+
+    private void StartAutoVisibilityMonitoring()
+    {
+        if (_disposed || _autoVisibilityMonitoringStarted)
+        {
+            return;
+        }
+
+        _autoVisibilityMonitoringStarted = true;
+        ApplyAutoVisibilityMonitoring();
+        LogMessage("Codex auto-visibility monitoring started after window startup completed.");
     }
 
     private void ApplyAutoVisibilityMonitoring()

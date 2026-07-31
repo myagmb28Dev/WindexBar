@@ -1211,6 +1211,27 @@ public sealed class CodexSessionStateReaderTests
     }
 
     [Fact]
+    public void ClassifiesASevenDayPrimarySessionWindowAsWeekly()
+    {
+        var codexHome = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var sessionDir = Path.Combine(codexHome, "sessions", "2026", "07", "29");
+        Directory.CreateDirectory(sessionDir);
+        File.WriteAllText(Path.Combine(sessionDir, "rollout-user.jsonl"), """
+        {"timestamp":"2026-07-29T06:00:00Z","type":"session_meta","payload":{"id":"user","thread_source":"user","source":"desktop"}}
+        {"timestamp":"2026-07-29T06:00:01Z","type":"turn_context","payload":{"model":"gpt-5.6-sol","effort":"high"}}
+        {"timestamp":"2026-07-29T06:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":1200}},"rate_limits":{"limit_id":"codex","primary":{"used_percent":1.0,"window_minutes":10080,"resets_at":1785907965},"secondary":null}}}
+        """);
+
+        var state = CodexSessionStateReader.ReadLatestState(TestEnvironment(codexHome));
+
+        var model = Assert.Single(state!.Models);
+        Assert.Equal("Codex", model.ModelName);
+        Assert.Null(model.Current);
+        Assert.Equal(1, model.Weekly!.UsedPercent);
+        Assert.Equal(10080, model.Weekly.WindowMinutes);
+    }
+
+    [Fact]
     public void ReadsTokenUsageForEachUserSessionAcrossProjects()
     {
         var codexHome = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -1318,7 +1339,7 @@ public sealed class CodexSessionStateReaderTests
     }
 
     [Fact]
-    public async Task CodexCliFetchDoesNotFallBackToSessionUsageWhenRpcFails()
+    public async Task CodexCliFetchFallsBackToSessionUsageWhenRpcFails()
     {
         var testRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         var binDir = Path.Combine(testRoot, "bin");
@@ -1330,7 +1351,7 @@ public sealed class CodexSessionStateReaderTests
         File.WriteAllText(Path.Combine(sessionDir, "rollout-user.jsonl"), """
         {"timestamp":"2026-06-18T00:59:00Z","type":"session_meta","payload":{"id":"user","thread_source":"user","source":"desktop"}}
         {"timestamp":"2026-06-18T00:59:01Z","type":"turn_context","payload":{"model":"gpt-5.3-codex-spark","effort":"xhigh"}}
-        {"timestamp":"2026-06-18T00:59:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"output_tokens":200,"total_tokens":1200},"last_token_usage":{"input_tokens":900,"output_tokens":100,"total_tokens":1000},"model_context_window":258400},"rate_limits":{"limit_id":"gpt-5.3-codex-spark","primary":{"used_percent":20.0,"window_minutes":300,"resets_at":1800000000}}}}
+        {"timestamp":"2026-06-18T00:59:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"output_tokens":200,"total_tokens":1200},"last_token_usage":{"input_tokens":900,"output_tokens":100,"total_tokens":1000},"model_context_window":258400},"rate_limits":{"limit_id":"gpt-5.3-codex-spark","primary":{"used_percent":1.0,"window_minutes":10080,"resets_at":1800000000}}}}
         """);
 
         var strategy = new CodexCliFetchStrategy(new QueueCodexRpcTransportFactory([Array.Empty<string>()]));
@@ -1346,7 +1367,66 @@ public sealed class CodexSessionStateReaderTests
             InitializeTimeout: TimeSpan.FromMilliseconds(20),
             RequestTimeout: TimeSpan.FromMilliseconds(20));
 
-        await Assert.ThrowsAsync<CodexRpcTimeoutException>(() => strategy.FetchAsync(context, CancellationToken.None));
+        var result = await strategy.FetchAsync(context, CancellationToken.None);
+
+        Assert.Equal(1, result.Usage.Models!.Single().Weekly!.UsedPercent);
+        Assert.Equal("gpt-5.3-codex-spark", result.Usage.ActiveModel!.Model);
+        Assert.Equal(1200, result.Usage.TokenUsage!.Total!.TotalTokens);
+        Assert.Single(result.Usage.Sessions!);
+        Assert.Null(result.Credits);
+    }
+
+    [Fact]
+    public async Task CodexCliFetchPrefersLatestGenericSessionLimitsOverRpcLimits()
+    {
+        var testRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var binDir = Path.Combine(testRoot, "bin");
+        var codexHome = Path.Combine(testRoot, "codex-home");
+        var sessionDir = Path.Combine(codexHome, "sessions", "2026", "07", "29");
+        Directory.CreateDirectory(binDir);
+        Directory.CreateDirectory(sessionDir);
+        File.WriteAllText(Path.Combine(binDir, "codex.cmd"), "@echo off\r\n");
+        File.WriteAllText(Path.Combine(sessionDir, "rollout-user.jsonl"), """
+        {"timestamp":"2026-07-29T06:00:00Z","type":"session_meta","payload":{"id":"session-1","thread_source":"user","source":"desktop"}}
+        {"timestamp":"2026-07-29T06:00:01Z","type":"turn_context","payload":{"model":"gpt-5.6-sol","effort":"high"}}
+        {"timestamp":"2026-07-29T06:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":1200}},"rate_limits":{"limit_id":"codex","primary":{"used_percent":1.0,"window_minutes":10080,"resets_at":1785907965},"secondary":null}}}
+        """);
+
+        static string Reply(int id, object result) => JsonSerializer.Serialize(new { id, result });
+        var transportFactory = new QueueCodexRpcTransportFactory(
+        [
+            [
+                Reply(1, new { ok = true }),
+                Reply(2, new
+                {
+                    rateLimits = new
+                    {
+                        primary = new { usedPercent = 10.0, windowDurationMins = 300, resetsAt = 1_800_000_000L },
+                        secondary = new { usedPercent = 14.0, windowDurationMins = 10080, resetsAt = 1_800_100_000L }
+                    }
+                }),
+                Reply(3, new { account = new { type = "chatgpt", planType = "pro" } }),
+                Reply(4, new { data = Array.Empty<object>(), nextCursor = (string?)null })
+            ]
+        ]);
+        var strategy = new CodexCliFetchStrategy(transportFactory);
+        var context = new ProviderFetchContext(
+            UsageProvider.Codex,
+            new Dictionary<string, string>
+            {
+                ["PATH"] = binDir,
+                ["PATHEXT"] = ".CMD",
+                ["CODEX_HOME"] = codexHome
+            },
+            IncludeCredits: true,
+            InitializeTimeout: TimeSpan.FromSeconds(1),
+            RequestTimeout: TimeSpan.FromSeconds(1));
+
+        var result = await strategy.FetchAsync(context, CancellationToken.None);
+
+        Assert.Equal(10, result.Usage.Primary!.UsedPercent);
+        Assert.Equal(1, result.Usage.Secondary!.UsedPercent);
+        Assert.Equal(1, result.Usage.Models!.Single(model => model.ModelName == "Codex").Weekly!.UsedPercent);
     }
 
     [Fact]
@@ -1598,15 +1678,14 @@ public sealed class InstallerBuildScriptTests
     }
 
     [Fact]
-    public void PublishUsesSizeOptimizedReleaseOptions()
+    public void PublishUsesStableWinUiReleaseOptions()
     {
         var script = File.ReadAllText(FindRepositoryFile("build-installer.cmd"));
 
-        Assert.Contains("-p:PublishTrimmed=true", script, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("-p:PublishTrimmed=false", script, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("-p:PublishReadyToRun=false", script, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("-p:DebugType=None", script, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("-p:DebugSymbols=false", script, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("-p:ILLinkTreatWarningsAsErrors=false", script, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -1989,6 +2068,51 @@ public sealed class ReleaseWorkflowTests
         Assert.Contains("_settingsStore.Config.Window.ClientWidth", mainWindow, StringComparison.Ordinal);
         Assert.Contains("_settingsStore.Config.Window.ClientHeight", mainWindow, StringComparison.Ordinal);
         Assert.Contains("SettingsStore.Persist();", app, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WindowStartupCompletesBeforeAutoVisibilityMonitoringStarts()
+    {
+        var app = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "App.xaml.cs")));
+        var trayService = File.ReadAllText(FindRepositoryFile(Path.Combine(
+            "src",
+            "WindexBar.Windows",
+            "TrayIconService.cs")));
+        var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine(
+            "src",
+            "WindexBar.Windows",
+            "MainWindow.xaml.cs")));
+
+        Assert.Contains("TrayIconService.Start();", app, StringComparison.Ordinal);
+        Assert.DoesNotContain("TrayIconService.ShowStatusWindow();", app, StringComparison.Ordinal);
+        Assert.Contains("ApplyInitialWindowSize();", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("RootLayout.Loaded += OnRootLayoutLoaded;", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("await _codexUpdateController.CheckAsync", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("StartupCompleted?.Invoke(this, EventArgs.Empty);", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("_statusWindow.StartupCompleted += OnStatusWindowStartupCompleted;", trayService, StringComparison.Ordinal);
+
+        var constructorStart = trayService.IndexOf("public TrayIconService(", StringComparison.Ordinal);
+        var startMethod = trayService.IndexOf("public void Start()", constructorStart, StringComparison.Ordinal);
+        Assert.True(constructorStart >= 0 && startMethod > constructorStart);
+        Assert.DoesNotContain(
+            "ApplyAutoVisibilityMonitoring();",
+            trayService[constructorStart..startMethod],
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WinUiReleasePublishDisablesUnsafeTrimming()
+    {
+        var project = File.ReadAllText(FindRepositoryFile(Path.Combine(
+            "src",
+            "WindexBar.Windows",
+            "WindexBar.Windows.csproj")));
+        var installerBuild = File.ReadAllText(FindRepositoryFile("build-installer.cmd"));
+
+        Assert.Contains("<PublishTrimmed>False</PublishTrimmed>", project, StringComparison.Ordinal);
+        Assert.DoesNotContain("<PublishTrimmed Condition=", project, StringComparison.Ordinal);
+        Assert.Contains("-p:PublishTrimmed=false", installerBuild, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("-p:PublishTrimmed=true", installerBuild, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

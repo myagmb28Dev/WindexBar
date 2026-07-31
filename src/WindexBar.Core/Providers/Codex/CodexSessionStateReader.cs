@@ -461,8 +461,10 @@ public static class CodexSessionStateReader
             return false;
         }
 
-        var current = TryReadRateWindow(limits, "primary");
-        var weekly = TryReadRateWindow(limits, "secondary");
+        RateWindow? current = null;
+        RateWindow? weekly = null;
+        AssignRateWindow(ref current, ref weekly, TryReadRateWindow(limits, "primary"), defaultWeekly: false);
+        AssignRateWindow(ref current, ref weekly, TryReadRateWindow(limits, "secondary"), defaultWeekly: true);
         if (current is null && weekly is null)
         {
             return false;
@@ -471,6 +473,29 @@ public static class CodexSessionStateReader
         model = new ModelUsageSnapshot(ReadRateLimitModelName(limits), current, weekly);
         return true;
     }
+
+    private static void AssignRateWindow(
+        ref RateWindow? current,
+        ref RateWindow? weekly,
+        RateWindow? window,
+        bool defaultWeekly)
+    {
+        if (window is null)
+        {
+            return;
+        }
+
+        if (defaultWeekly || IsWeeklyWindow(window))
+        {
+            weekly = window;
+            return;
+        }
+
+        current = window;
+    }
+
+    private static bool IsWeeklyWindow(RateWindow window) =>
+        window.WindowMinutes is >= 7 * 24 * 60 and < 8 * 24 * 60;
 
     private static RateWindow? TryReadRateWindow(JsonElement limits, string name)
     {

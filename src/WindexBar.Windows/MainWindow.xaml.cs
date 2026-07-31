@@ -57,6 +57,9 @@ public sealed partial class MainWindow : Window
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetCursorPos(out NativePoint point);
 
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(IntPtr window);
+
     private readonly UsageStore _usageStore;
     private readonly SettingsStore _settingsStore;
     private readonly WinUiDispatcherQueue _dispatcher;
@@ -158,6 +161,7 @@ public sealed partial class MainWindow : Window
             () => StyleView.Visibility == Visibility.Visible);
         ApplyLanguage();
         ConfigureCompactWindow();
+        ApplyInitialWindowSize();
         AppWindow.Changed += OnAppWindowChanged;
         RootLayout.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(OnScrollNavigationKeyDown), true);
         RootLayout.PointerPressed += (_, args) =>
@@ -168,21 +172,7 @@ public sealed partial class MainWindow : Window
             }
         };
 
-        RootLayout.Loaded += async (_, _) =>
-        {
-            RootLayout.Focus(FocusState.Programmatic);
-            if (!TryRestoreWindowSize())
-            {
-                ResizeForCurrentView();
-            }
-
-            _hasAppliedInitialWindowSize = true;
-            if (!_codexVersionCheckStarted)
-            {
-                _codexVersionCheckStarted = true;
-                await _codexUpdateController.CheckAsync(forceLatestVersionRefresh: false);
-            }
-        };
+        RootLayout.Loaded += OnRootLayoutLoaded;
 
         _usageStore.Changed += OnUsageChanged;
         _settingsStore.Changed += OnSettingsChanged;
@@ -214,6 +204,42 @@ public sealed partial class MainWindow : Window
     }
 
     internal bool HasOpenAppUpdatePrompt => _appUpdatePromptWindow is not null;
+    internal bool HasCompletedStartup { get; private set; }
+    internal event EventHandler? StartupCompleted;
+
+    private async void OnRootLayoutLoaded(object sender, RoutedEventArgs args)
+    {
+        RootLayout.Loaded -= OnRootLayoutLoaded;
+        RootLayout.Focus(FocusState.Programmatic);
+        try
+        {
+            ApplyInitialWindowSize();
+            _hasAppliedInitialWindowSize = true;
+            if (!_codexVersionCheckStarted)
+            {
+                _codexVersionCheckStarted = true;
+                await _codexUpdateController.CheckAsync(forceLatestVersionRefresh: false);
+            }
+        }
+        catch (Exception error)
+        {
+            AppLog.Write("Failed to complete WindexBar window startup.", error);
+        }
+        finally
+        {
+            HasCompletedStartup = true;
+            try
+            {
+                StartupCompleted?.Invoke(this, EventArgs.Empty);
+            }
+            catch (Exception error)
+            {
+                AppLog.Write("Failed to notify that WindexBar window startup completed.", error);
+            }
+
+            AppLog.Write("WindexBar window startup completed.");
+        }
+    }
 
     private void BuildLayout()
     {
@@ -668,6 +694,14 @@ public sealed partial class MainWindow : Window
         ResizeClientToEffectiveSize(HudClientWidth, ContentClientHeight);
     }
 
+    private void ApplyInitialWindowSize()
+    {
+        if (!TryRestoreWindowSize())
+        {
+            ResizeForCurrentView();
+        }
+    }
+
     private bool TryRestoreWindowSize()
     {
         var window = _settingsStore.Config.Window;
@@ -682,12 +716,19 @@ public sealed partial class MainWindow : Window
 
     private void ResizeClientToEffectiveSize(double width, double height)
     {
-        var scale = RootLayout.XamlRoot?.RasterizationScale ?? 1;
+        var scale = RootLayout.XamlRoot?.RasterizationScale ?? WindowScale();
         var clientWidth = (int)Math.Ceiling(width * scale);
         var clientHeight = (int)Math.Ceiling(height * scale);
         var position = _windowPlacement.PositionForResize(new WindowPosition(AppWindow.Position.X, AppWindow.Position.Y));
         AppWindow.ResizeClient(new SizeInt32(clientWidth, clientHeight));
         AppWindow.Move(new PointInt32(position.X, position.Y));
+    }
+
+    private double WindowScale()
+    {
+        var window = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        var dpi = window == IntPtr.Zero ? 0 : GetDpiForWindow(window);
+        return dpi == 0 ? 1d : dpi / 96d;
     }
 
 

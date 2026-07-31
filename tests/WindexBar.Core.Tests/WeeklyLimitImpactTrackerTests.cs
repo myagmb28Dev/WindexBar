@@ -163,6 +163,28 @@ public sealed class WeeklyLimitImpactTrackerTests
     }
 
     [Fact]
+    public void AttributesFreshUsageWhenAUsageDropComesFromAChangedResetSchedule()
+    {
+        var store = new MemoryStateStore();
+        var tracker = new WeeklyLimitImpactTracker(store);
+        tracker.Apply(Snapshot(10, Session("a", 100_000, @"D:\Codes\ProjectA")));
+        tracker.Apply(Snapshot(14, Session("a", 221_000, @"D:\Codes\ProjectA")));
+
+        var result = tracker.Apply(Snapshot(
+            1,
+            ResetAt.AddDays(3),
+            Session("a", 230_000, @"D:\Codes\ProjectA")) with
+        {
+            UpdatedAt = ResetAt.AddDays(-1)
+        });
+
+        Assert.Equal(1, Assert.Single(result.Sessions!).WeeklyLimitImpactPercent);
+        Assert.Equal(1, Assert.Single(store.State.SessionImpacts).Value);
+        Assert.Equal(1, store.State.LastUsedPercent);
+        Assert.Equal(ResetAt.AddDays(3), store.State.WindowResetsAt);
+    }
+
+    [Fact]
     public void PrefersTheStableAccountWindowOverChangingModelWindows()
     {
         var store = new MemoryStateStore();

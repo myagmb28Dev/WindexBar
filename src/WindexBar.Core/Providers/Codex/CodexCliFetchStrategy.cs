@@ -29,43 +29,111 @@ public sealed class CodexCliFetchStrategy : IProviderFetchStrategy
         var sessions = sessionState?.Sessions ?? [];
         var now = DateTimeOffset.Now;
 
-        await using var transport = _transportFactory.Start(executable, BaseArguments, context.Environment);
-        await using var client = new CodexRpcClient(transport, context.InitializeTimeout, context.RequestTimeout);
-        await client.InitializeAsync(cancellationToken).ConfigureAwait(false);
-
-        var limits = await client.FetchRateLimitsAsync(cancellationToken).ConfigureAwait(false);
-        RpcAccountResponse? account = null;
         try
         {
-            account = await client.FetchAccountAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception) when (!cancellationToken.IsCancellationRequested)
-        {
-        }
+            await using var transport = _transportFactory.Start(executable, BaseArguments, context.Environment);
+            await using var client = new CodexRpcClient(transport, context.InitializeTimeout, context.RequestTimeout);
+            await client.InitializeAsync(cancellationToken).ConfigureAwait(false);
 
-        try
-        {
-            var threads = await client.FetchThreadsAsync(cancellationToken).ConfigureAwait(false);
-            sessions = FilterAndEnrichSessions(sessions, threads.Data);
+            var limits = await client.FetchRateLimitsAsync(cancellationToken).ConfigureAwait(false);
+            RpcAccountResponse? account = null;
+            try
+            {
+                account = await client.FetchAccountAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception) when (!cancellationToken.IsCancellationRequested)
+            {
+            }
+
+            try
+            {
+                var threads = await client.FetchThreadsAsync(cancellationToken).ConfigureAwait(false);
+                sessions = FilterAndEnrichSessions(sessions, threads.Data);
+            }
+            catch (Exception) when (!cancellationToken.IsCancellationRequested)
+            {
+                sessions = FilterUnavailableProjectSessions(sessions);
+            }
+
+            var usage = CodexUsageMapper.MapUsage(limits, account, now);
+            var credits = context.IncludeCredits ? CodexUsageMapper.MapCredits(limits.RateLimits.Credits, now) : null;
+            if (usage is null && credits is null && activeModel is null && tokenUsage is null)
+            {
+                throw new InvalidOperationException("Codex returned no rate limits or credits.");
+            }
+
+            usage ??= new UsageSnapshot(null, null, now, null);
+            usage = EnrichWithSessionState(usage, sessionState, sessions);
+            return new ProviderFetchResult(usage, credits);
         }
-        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        catch (Exception) when (!cancellationToken.IsCancellationRequested && HasSessionRateLimits(sessionState))
         {
             sessions = FilterUnavailableProjectSessions(sessions);
+            var usage = EnrichWithSessionState(
+                new UsageSnapshot(null, null, now, null),
+                sessionState,
+                sessions);
+            return new ProviderFetchResult(usage, null);
         }
-
-        var usage = CodexUsageMapper.MapUsage(limits, account, now);
-        var credits = context.IncludeCredits ? CodexUsageMapper.MapCredits(limits.RateLimits.Credits, now) : null;
-        if (usage is null && credits is null && activeModel is null && tokenUsage is null)
-        {
-            throw new InvalidOperationException("Codex returned no rate limits or credits.");
-        }
-
-        usage ??= new UsageSnapshot(null, null, now, null);
-        usage = usage with { ActiveModel = activeModel, TokenUsage = tokenUsage, Sessions = sessions };
-        return new ProviderFetchResult(usage, credits);
     }
 
     public bool ShouldFallback(Exception error, ProviderFetchContext context) => false;
+
+    private static bool HasSessionRateLimits(CodexSessionStateSnapshot? sessionState) =>
+        sessionState?.Models.Any(model => model.HasRateLimitWindows) == true;
+
+    private static UsageSnapshot EnrichWithSessionState(
+        UsageSnapshot usage,
+        CodexSessionStateSnapshot? sessionState,
+        IReadOnlyList<CodexSessionUsageSnapshot> sessions)
+    {
+        var sessionModels = sessionState?.Models ?? [];
+        var models = MergeSessionModels(usage.Models, sessionModels);
+        var genericSessionModel = sessionModels.FirstOrDefault(model =>
+            IsSameModelName(model.ModelName, "Codex"));
+
+        return usage with
+        {
+            Primary = genericSessionModel?.Current ?? usage.Primary,
+            Secondary = genericSessionModel?.Weekly ?? usage.Secondary,
+            Models = models,
+            ActiveModel = sessionState?.ActiveModel,
+            TokenUsage = sessionState?.TokenUsage,
+            Sessions = sessions
+        };
+    }
+
+    private static IReadOnlyList<ModelUsageSnapshot> MergeSessionModels(
+        IReadOnlyList<ModelUsageSnapshot>? rpcModels,
+        IReadOnlyList<ModelUsageSnapshot> sessionModels)
+    {
+        var merged = (rpcModels ?? [])
+            .Where(model => model.HasRateLimitWindows)
+            .ToList();
+        foreach (var sessionModel in sessionModels.Where(model => model.HasRateLimitWindows))
+        {
+            var existingIndex = merged.FindIndex(model => IsSameModelName(model.ModelName, sessionModel.ModelName));
+            if (existingIndex < 0)
+            {
+                merged.Add(sessionModel);
+                continue;
+            }
+
+            var existing = merged[existingIndex];
+            merged[existingIndex] = new ModelUsageSnapshot(
+                existing.ModelName,
+                sessionModel.Current ?? existing.Current,
+                sessionModel.Weekly ?? existing.Weekly);
+        }
+
+        return merged;
+    }
+
+    private static bool IsSameModelName(string lhs, string rhs) =>
+        string.Equals(
+            CodexModelNaming.NormalizeModelKey(lhs),
+            CodexModelNaming.NormalizeModelKey(rhs),
+            StringComparison.OrdinalIgnoreCase);
 
     private static IReadOnlyList<CodexSessionUsageSnapshot> FilterAndEnrichSessions(
         IReadOnlyList<CodexSessionUsageSnapshot> sessions,
