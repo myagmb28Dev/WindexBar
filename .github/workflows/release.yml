@@ -425,7 +425,7 @@ jobs:
           $arguments = @(
             'update'
             'myagmb28Dev.WindexBar'
-            '--urls', $installerUrl
+            '--urls', "${installerUrl}|x64"
             '--version', $env:RELEASE_VERSION
             '--release-notes-url', $releaseNotesUrl
             '--release-date', $releaseDate

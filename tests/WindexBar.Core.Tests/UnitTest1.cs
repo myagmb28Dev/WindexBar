@@ -1969,6 +1969,15 @@ public sealed class ReleaseWorkflowTests
     }
 
     [Fact]
+    public void ReleaseWorkflowPinsWingetInstallerArchitecture()
+    {
+        var workflow = File.ReadAllText(FindRepositoryFile(Path.Combine(".github", "workflows", "release.yml")));
+
+        Assert.Contains("'--urls', \"${installerUrl}|x64\"", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("'--urls', $installerUrl", workflow, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AppContainsGenerated3072BitUpdatePublicKey()
     {
         var source = File.ReadAllText(FindRepositoryFile(Path.Combine(
