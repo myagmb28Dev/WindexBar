@@ -33,6 +33,14 @@
 
 Download and run `WindexBarSetup.exe` from the GitHub Releases page.
 
+WinGet install:
+
+```powershell
+winget install --id myagmb28Dev.WindexBar --exact --source winget --accept-source-agreements --accept-package-agreements
+```
+
+WinGet installs the latest published version. Open WindexBar from the Start menu after installation; silent WinGet installs do not launch the app automatically.
+
 Source install:
 
 ```powershell
