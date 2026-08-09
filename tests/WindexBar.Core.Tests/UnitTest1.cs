@@ -2080,7 +2080,7 @@ public sealed class ReleaseWorkflowTests
     }
 
     [Fact]
-    public void WindowStartupCompletesBeforeAutoVisibilityMonitoringStarts()
+    public void WindowStartupWiresAutoVisibilityMonitoringAfterWindowCreation()
     {
         var app = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "App.xaml.cs")));
         var trayService = File.ReadAllText(FindRepositoryFile(Path.Combine(
@@ -2107,6 +2107,47 @@ public sealed class ReleaseWorkflowTests
             "ApplyAutoVisibilityMonitoring();",
             trayService[constructorStart..startMethod],
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AutoShowStartsMonitoringWithoutShowingTheInitialWindow()
+    {
+        var trayService = File.ReadAllText(FindRepositoryFile(Path.Combine(
+            "src",
+            "WindexBar.Windows",
+            "TrayIconService.cs")));
+        var startIndex = trayService.IndexOf("public void Start()", StringComparison.Ordinal);
+        var showIndex = trayService.IndexOf("public void ShowStatusWindow()", startIndex, StringComparison.Ordinal);
+        Assert.True(startIndex >= 0 && showIndex > startIndex);
+        var startMethod = trayService[startIndex..showIndex];
+
+        Assert.Contains("if (_settingsStore.Config.AutoShowWithCodex)", startMethod, StringComparison.Ordinal);
+        Assert.Contains("StartAutoVisibilityMonitoring();", startMethod, StringComparison.Ordinal);
+        Assert.Contains("return;", startMethod, StringComparison.Ordinal);
+        Assert.Contains("ShowStatusWindow();", startMethod, StringComparison.Ordinal);
+        Assert.True(
+            startMethod.IndexOf("StartAutoVisibilityMonitoring();", StringComparison.Ordinal)
+                < startMethod.IndexOf("ShowStatusWindow();", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void CodexCliDetectionRepeatsWithoutAutomaticUpdatePrompt()
+    {
+        var controller = File.ReadAllText(FindRepositoryFile(Path.Combine(
+            "src",
+            "WindexBar.Windows",
+            "Controllers",
+            "CodexUpdateController.cs")));
+        var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine(
+            "src",
+            "WindexBar.Windows",
+            "MainWindow.xaml.cs")));
+
+        Assert.Contains("TimeSpan.FromMinutes(1)", controller, StringComparison.Ordinal);
+        Assert.Contains("_codexCliDetectionTimer.Tick += OnCodexCliDetectionTimerTick", controller, StringComparison.Ordinal);
+        Assert.Contains("allowAutomaticUpdate: false", controller, StringComparison.Ordinal);
+        Assert.Contains("_codexCliDetectionTimer.Start()", controller, StringComparison.Ordinal);
+        Assert.Contains("_codexUpdateController.Dispose();", mainWindow, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -70,6 +70,12 @@ public sealed class TrayIconService : IDisposable
         }
 
         _started = true;
+        if (_settingsStore.Config.AutoShowWithCodex)
+        {
+            StartAutoVisibilityMonitoring();
+            return;
+        }
+
         ShowStatusWindow();
         if (_statusWindow?.HasCompletedStartup == true)
         {
@@ -401,7 +407,7 @@ public sealed class TrayIconService : IDisposable
 
         _autoVisibilityMonitoringStarted = true;
         ApplyAutoVisibilityMonitoring();
-        LogMessage("Codex auto-visibility monitoring started after window startup completed.");
+        LogMessage("Codex auto-visibility monitoring started.");
     }
 
     private void ApplyAutoVisibilityMonitoring()

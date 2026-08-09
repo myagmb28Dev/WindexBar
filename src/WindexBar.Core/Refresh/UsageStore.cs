@@ -36,6 +36,7 @@ public sealed class UsageStore : IDisposable
     public CreditsSnapshot? Credits { get; private set; }
     public string? LastError { get; private set; }
     public bool IsRefreshing { get; private set; }
+    public bool IsBackgroundRefreshRunning => _loopCts is not null;
 
     public IReadOnlyList<RateLimitThresholdAlert> TakeRateLimitAlerts()
     {

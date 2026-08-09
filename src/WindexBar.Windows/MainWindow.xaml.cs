@@ -184,6 +184,7 @@ public sealed partial class MainWindow : Window
             _gaugeColorWindow?.Close();
             _gaugeColorWindow = null;
             CloseAuxiliaryWindows();
+            _codexUpdateController.Dispose();
             AppWindow.Changed -= OnAppWindowChanged;
             _usageStore.Changed -= OnUsageChanged;
             _settingsStore.Changed -= OnSettingsChanged;

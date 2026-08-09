@@ -9,6 +9,7 @@ namespace WindexBar.Windows.Controllers;
 
 internal sealed class CodexUpdateController
 {
+    private static readonly TimeSpan CodexCliDetectionInterval = TimeSpan.FromMinutes(1);
     private readonly SettingsViewControl _view;
     private readonly SettingsStore _settingsStore;
     private readonly UsageStore _usageStore;
@@ -16,6 +17,9 @@ internal sealed class CodexUpdateController
     private readonly Func<XamlRoot?> _xamlRootProvider;
     private readonly Func<string, string, string> _text;
     private readonly CancellationToken _cancellationToken;
+    private readonly DispatcherTimer _codexCliDetectionTimer = new();
+    private bool _checkInProgress;
+    private bool _disposed;
 
     public CodexUpdateController(
         SettingsViewControl view,
@@ -36,6 +40,8 @@ internal sealed class CodexUpdateController
         _view.CheckCodexVersionButton.Click += OnCheckClicked;
         _view.CodexInstallMethodComboBox.SelectionChanged += (_, _) => ApplyCustomCommandVisibility();
         _view.CustomCodexUpdateCommandTextBox.TextChanged += (_, _) => UpdateCommandPreview();
+        _codexCliDetectionTimer.Interval = CodexCliDetectionInterval;
+        _codexCliDetectionTimer.Tick += OnCodexCliDetectionTimerTick;
     }
 
     public CodexVersionCheckResult? LastCheck { get; private set; }
@@ -69,8 +75,17 @@ internal sealed class CodexUpdateController
         config.CodexUpdates.CustomCommand = _view.CustomCodexUpdateCommandTextBox.Text;
     }
 
-    public async Task CheckAsync(bool forceLatestVersionRefresh, bool showCurrentResult = false)
+    public async Task CheckAsync(
+        bool forceLatestVersionRefresh,
+        bool showCurrentResult = false,
+        bool allowAutomaticUpdate = true)
     {
+        if (_disposed || _checkInProgress)
+        {
+            return;
+        }
+
+        _checkInProgress = true;
         _view.CheckCodexVersionButton.IsEnabled = false;
         UpdateStatus(null, checking: true);
         var cachedVersion = _settingsStore.Config.CodexUpdates.LatestVersion;
@@ -83,7 +98,7 @@ internal sealed class CodexUpdateController
                 _cancellationToken);
             LastCheck = result;
             UpdateStatus(result);
-            if (CanRefreshUsage)
+            if (CanRefreshUsage && !_usageStore.IsBackgroundRefreshRunning)
             {
                 _usageStore.StartBackgroundRefresh();
             }
@@ -94,9 +109,10 @@ internal sealed class CodexUpdateController
                 _settingsStore.Save();
             }
 
-            if (result.Status is CodexVersionStatus.Missing
-                or CodexVersionStatus.RequiredUpdate
-                or CodexVersionStatus.RecommendedUpdate)
+            if (allowAutomaticUpdate
+                && result.Status is (CodexVersionStatus.Missing
+                    or CodexVersionStatus.RequiredUpdate
+                    or CodexVersionStatus.RecommendedUpdate))
             {
                 await RunUpdateAsync(result);
             }
@@ -126,11 +142,35 @@ internal sealed class CodexUpdateController
         finally
         {
             _view.CheckCodexVersionButton.IsEnabled = true;
+            _checkInProgress = false;
+            if (!_disposed && !_codexCliDetectionTimer.IsEnabled)
+            {
+                _codexCliDetectionTimer.Start();
+            }
         }
     }
 
     private async void OnCheckClicked(object sender, RoutedEventArgs args) =>
         await CheckAsync(forceLatestVersionRefresh: true, showCurrentResult: true);
+
+    private async void OnCodexCliDetectionTimerTick(object? sender, object args) =>
+        await CheckAsync(
+            forceLatestVersionRefresh: false,
+            showCurrentResult: false,
+            allowAutomaticUpdate: false);
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _codexCliDetectionTimer.Stop();
+        _codexCliDetectionTimer.Tick -= OnCodexCliDetectionTimerTick;
+        _view.CheckCodexVersionButton.Click -= OnCheckClicked;
+    }
 
     private async Task RunUpdateAsync(CodexVersionCheckResult check)
     {
