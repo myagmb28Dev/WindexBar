@@ -5,7 +5,7 @@ namespace WindexBar.Core.Providers.Codex;
 
 public sealed class CodexCliFetchStrategy : IProviderFetchStrategy
 {
-    private static readonly string[] BaseArguments = ["-s", "read-only", "-a", "untrusted", "app-server"];
+    private static readonly string[] BaseArguments = ["-s", "read-only", "-a", "never", "app-server"];
     private readonly ICodexRpcTransportFactory _transportFactory;
 
     public CodexCliFetchStrategy(ICodexRpcTransportFactory? transportFactory = null)
