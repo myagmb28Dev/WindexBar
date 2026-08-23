@@ -1339,6 +1339,47 @@ public sealed class CodexSessionStateReaderTests
     }
 
     [Fact]
+    public async Task CodexCliFetchUsesSupportedNonInteractiveApprovalPolicy()
+    {
+        var testRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var binDir = Path.Combine(testRoot, "bin");
+        Directory.CreateDirectory(binDir);
+        File.WriteAllText(Path.Combine(binDir, "codex.cmd"), "@echo off\r\n");
+
+        static string Reply(int id, object result) => JsonSerializer.Serialize(new { id, result });
+        var transportFactory = new QueueCodexRpcTransportFactory(
+        [
+            [
+                Reply(1, new { ok = true }),
+                Reply(2, new
+                {
+                    rateLimits = new
+                    {
+                        primary = new { usedPercent = 10.0, windowDurationMins = 300, resetsAt = 1_800_000_000L }
+                    }
+                }),
+                Reply(3, new { account = new { type = "chatgpt", planType = "pro" } }),
+                Reply(4, new { data = Array.Empty<object>(), nextCursor = (string?)null })
+            ]
+        ]);
+        var strategy = new CodexCliFetchStrategy(transportFactory);
+        var context = new ProviderFetchContext(
+            UsageProvider.Codex,
+            new Dictionary<string, string>
+            {
+                ["PATH"] = binDir,
+                ["PATHEXT"] = ".CMD"
+            },
+            IncludeCredits: true,
+            InitializeTimeout: TimeSpan.FromSeconds(1),
+            RequestTimeout: TimeSpan.FromSeconds(1));
+
+        await strategy.FetchAsync(context, CancellationToken.None);
+
+        Assert.Equal(["-s", "read-only", "-a", "never", "app-server"], transportFactory.Arguments);
+    }
+
+    [Fact]
     public async Task CodexCliFetchFallsBackToSessionUsageWhenRpcFails()
     {
         var testRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -2332,8 +2373,11 @@ internal sealed class QueueCodexRpcTransportFactory : ICodexRpcTransportFactory
         _sessions = new Queue<string[]>(sessions);
     }
 
+    public IReadOnlyList<string> Arguments { get; private set; } = [];
+
     public ICodexRpcTransport Start(string executablePath, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> environment)
     {
+        Arguments = arguments.ToArray();
         return new FakeCodexRpcTransport(_sessions.Count > 0 ? _sessions.Dequeue() : Array.Empty<string>());
     }
 }
