@@ -10,12 +10,16 @@ internal sealed class GaugeBar(
     Grid track,
     Border fill,
     Border sweep,
+    Border trackGlow,
+    Border fillGlow,
     double targetValue = 0)
 {
     public string Key { get; } = key;
     public Grid Track { get; } = track;
     public Border Fill { get; } = fill;
     public Border Sweep { get; } = sweep;
+    public Border TrackGlow { get; } = trackGlow;
+    public Border FillGlow { get; } = fillGlow;
     public double CurrentValue { get; set; }
     public double TargetValue { get; set; } = targetValue;
 }
@@ -213,7 +217,9 @@ internal sealed class GaugeAnimator : IDisposable
         var value = Math.Clamp(bar.CurrentValue, 0, 100);
         var target = Math.Clamp(bar.TargetValue, 0, 100);
         var safeSweep = Math.Clamp(sweep, 0, 1);
-        bar.Fill.Width = width * (value / 100d);
+        var fillWidth = width * (value / 100d);
+        bar.Fill.Width = fillWidth;
+        bar.FillGlow.Width = fillWidth;
         bar.Sweep.Width = animationEnabled ? width * (target * safeSweep / 100d) : 0;
         bar.Sweep.Opacity = animationEnabled ? 0.22 + (0.28 * safeSweep) : 0;
     }
@@ -232,6 +238,10 @@ internal sealed class GaugeAnimator : IDisposable
         {
             border.CornerRadius = radius;
         }
+        bar.TrackGlow.Height = thickness + 8;
+        bar.TrackGlow.CornerRadius = new CornerRadius((thickness + 8) / 2d);
+        bar.FillGlow.Height = thickness + 4;
+        bar.FillGlow.CornerRadius = new CornerRadius((thickness + 4) / 2d);
 
         var normalized = StyleConfig.NormalizeGaugeColor(style.GaugeColor);
         var color = global::Windows.UI.Color.FromArgb(

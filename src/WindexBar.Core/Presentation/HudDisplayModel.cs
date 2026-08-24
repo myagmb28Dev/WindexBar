@@ -30,9 +30,7 @@ public static class HudDisplayModelFactory
         var hasRateLimitDisplay = currentSessionModel is not null
             || snapshot?.Primary is not null
             || snapshot?.Secondary is not null;
-        var header = hasRateLimitDisplay
-            ? FirstNonBlank(activeModel?.DisplayName, activeModel?.Model, "Codex")
-            : "Codex";
+        var header = hasRateLimitDisplay ? FormatHeader(activeModel) : "Codex";
 
         return new HudDisplayModel(
             header,
@@ -138,6 +136,16 @@ public static class HudDisplayModelFactory
 
     private static string FirstNonBlank(params string?[] values) =>
         values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
+
+    private static string FormatHeader(CodexModelSelection? activeModel)
+    {
+        var header = FirstNonBlank(activeModel?.DisplayName, activeModel?.Model, "Codex");
+        const string fastSuffix = " Fast";
+        return string.Equals(activeModel?.ServiceTier, "fast", StringComparison.OrdinalIgnoreCase)
+            && header.EndsWith(fastSuffix, StringComparison.OrdinalIgnoreCase)
+                ? header[..^fastSuffix.Length]
+                : header;
+    }
 
     private static bool IsKorean(string language) =>
         string.Equals(language, "ko", StringComparison.OrdinalIgnoreCase);

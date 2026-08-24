@@ -2,6 +2,7 @@ using WindexBar.Core.Presentation;
 using WindexBar.Windows.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using static WindexBar.Windows.Views.FeatureViewHelpers;
 
 namespace WindexBar.Windows.Views;
@@ -86,12 +87,14 @@ internal sealed class HudViewControl : UserControl
         Grid.SetRow(ModelContentPanel, 3);
         content.Children.Add(ModelContentPanel);
 
-        CurrentGauge = AddWindowSection(ModelContentPanel, 0, "current", out var currentLabel, out var currentPercent, out var currentDetail);
+        CurrentGauge = AddWindowSection(ModelContentPanel, 0, "current", out var currentLabel, out var currentLabelGlow, out var currentPercent, out var currentDetail);
         CurrentLabelText = currentLabel;
+        _currentLabelGlowText = currentLabelGlow;
         CurrentPercentText = currentPercent;
         CurrentDetailText = currentDetail;
-        WeeklyGauge = AddWindowSection(ModelContentPanel, 3, "weekly", out var weeklyLabel, out var weeklyPercent, out var weeklyDetail);
+        WeeklyGauge = AddWindowSection(ModelContentPanel, 3, "weekly", out var weeklyLabel, out var weeklyLabelGlow, out var weeklyPercent, out var weeklyDetail);
         WeeklyLabelText = weeklyLabel;
+        _weeklyLabelGlowText = weeklyLabelGlow;
         WeeklyPercentText = weeklyPercent;
         WeeklyDetailText = weeklyDetail;
 
@@ -133,6 +136,8 @@ internal sealed class HudViewControl : UserControl
     public TextBlock ErrorText { get; }
     public GaugeBar CurrentGauge { get; }
     public GaugeBar WeeklyGauge { get; }
+    private readonly TextBlock _currentLabelGlowText;
+    private readonly TextBlock _weeklyLabelGlowText;
 
     public void Bind(HudDisplayModel model, string currentLabel, string weeklyLabel)
     {
@@ -141,12 +146,36 @@ internal sealed class HudViewControl : UserControl
         MetaText.Visibility = string.IsNullOrWhiteSpace(model.Meta) ? Visibility.Collapsed : Visibility.Visible;
         AccountText.Text = model.Account;
         ErrorText.Text = model.Error;
-        CurrentLabelText.Text = currentLabel;
-        WeeklyLabelText.Text = weeklyLabel;
+        SetWindowLabels(currentLabel, weeklyLabel);
         CurrentPercentText.Text = model.Current.Percent;
         CurrentDetailText.Text = model.Current.Detail;
         WeeklyPercentText.Text = model.Weekly.Percent;
         WeeklyDetailText.Text = model.Weekly.Detail;
+    }
+
+    public void SetWindowLabels(string currentLabel, string weeklyLabel)
+    {
+        CurrentLabelText.Text = currentLabel;
+        WeeklyLabelText.Text = weeklyLabel;
+        _currentLabelGlowText.Text = currentLabel;
+        _weeklyLabelGlowText.Text = weeklyLabel;
+    }
+
+    public void SetFastTierAppearance(bool isFastTier)
+    {
+        var labelColor = isFastTier
+            ? Brush(0xFF, 0xFF, 0xE0, 0x82)
+            : Brush(0xFF, 0xED, 0xE7, 0xFF);
+        CurrentLabelText.Foreground = labelColor;
+        WeeklyLabelText.Foreground = labelColor;
+        _currentLabelGlowText.Opacity = isFastTier ? 0.42 : 0;
+        _weeklyLabelGlowText.Opacity = isFastTier ? 0.42 : 0;
+
+        foreach (var gauge in new[] { CurrentGauge, WeeklyGauge })
+        {
+            gauge.TrackGlow.Opacity = isFastTier ? 0.2 : 0;
+            gauge.FillGlow.Opacity = isFastTier ? 0.48 : 0;
+        }
     }
 
     private static GaugeBar AddWindowSection(
@@ -154,6 +183,7 @@ internal sealed class HudViewControl : UserControl
         int row,
         string key,
         out TextBlock label,
+        out TextBlock labelGlow,
         out TextBlock percent,
         out TextBlock detail)
     {
@@ -163,12 +193,25 @@ internal sealed class HudViewControl : UserControl
         Grid.SetRow(header, row);
         root.Children.Add(header);
 
+        var labelHost = new Grid();
+        header.Children.Add(labelHost);
+        labelGlow = new TextBlock
+        {
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Foreground = Brush(0xFF, 0xFF, 0xC8, 0x36),
+            Opacity = 0,
+            CharacterSpacing = 8,
+            IsHitTestVisible = false,
+            RenderTransformOrigin = new global::Windows.Foundation.Point(0.5, 0.5),
+            RenderTransform = new CompositeTransform { ScaleX = 1.025, ScaleY = 1.08 }
+        };
+        labelHost.Children.Add(labelGlow);
         label = new TextBlock
         {
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             Foreground = Brush(0xFF, 0xED, 0xE7, 0xFF)
         };
-        header.Children.Add(label);
+        labelHost.Children.Add(label);
         percent = new TextBlock { FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
         Grid.SetColumn(percent, 1);
         header.Children.Add(percent);
@@ -196,6 +239,27 @@ internal sealed class HudViewControl : UserControl
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(3)
         });
+        var trackGlow = new Border
+        {
+            Height = 14,
+            Background = Brush(0xFF, 0xFF, 0xC8, 0x36),
+            Opacity = 0,
+            IsHitTestVisible = false,
+            VerticalAlignment = VerticalAlignment.Center,
+            CornerRadius = new CornerRadius(7)
+        };
+        track.Children.Add(trackGlow);
+        var fillGlow = new Border
+        {
+            Height = 10,
+            Background = Brush(0xFF, 0xFF, 0xDC, 0x68),
+            Opacity = 0,
+            IsHitTestVisible = false,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Center,
+            CornerRadius = new CornerRadius(5)
+        };
+        track.Children.Add(fillGlow);
         var fill = new Border
         {
             Background = Brush(0xFF, 0x8D, 0x78, 0xD6),
@@ -211,7 +275,7 @@ internal sealed class HudViewControl : UserControl
             HorizontalAlignment = HorizontalAlignment.Left
         };
         track.Children.Add(sweep);
-        return new GaugeBar(key, track, fill, sweep, target);
+        return new GaugeBar(key, track, fill, sweep, trackGlow, fillGlow, target);
     }
 
     private static TextBlock AddLabelValueRow(Grid root, int row, string label, out TextBlock labelText)

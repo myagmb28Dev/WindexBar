@@ -130,7 +130,7 @@ public sealed class PresentationModelTests
 
         var model = HudDisplayModelFactory.Create(snapshot, null, false, "en", now);
 
-        Assert.Equal("GPT-5.6 Sol XHigh Fast", model.Header);
+        Assert.Equal("GPT-5.6 Sol XHigh", model.Header);
         Assert.Equal("unknown", model.Current.Percent);
         Assert.Equal("100%", model.Weekly.Percent);
     }
