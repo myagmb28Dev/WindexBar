@@ -2316,6 +2316,29 @@ public sealed class ReleaseWorkflowTests
     }
 
     [Fact]
+    public void FastTierHudPulsesOnlyTheLightningIndicators()
+    {
+        var hudView = File.ReadAllText(FindRepositoryFile(Path.Combine(
+            "src",
+            "WindexBar.Windows",
+            "Views",
+            "HudViewControl.cs")));
+        var gaugeAnimator = File.ReadAllText(FindRepositoryFile(Path.Combine(
+            "src",
+            "WindexBar.Windows",
+            "UI",
+            "GaugeAnimator.cs")));
+
+        Assert.Equal(2, Regex.Matches(hudView, "Text = \"\\\\u26A1\"").Count);
+        Assert.Contains("AutoReverse = true", hudView, StringComparison.Ordinal);
+        Assert.Contains("RepeatBehavior = RepeatBehavior.Forever", hudView, StringComparison.Ordinal);
+        Assert.Contains("indicator.Visibility = isFastTier ? Visibility.Visible : Visibility.Collapsed", hudView, StringComparison.Ordinal);
+        Assert.DoesNotContain("labelColor = isFastTier", hudView, StringComparison.Ordinal);
+        Assert.DoesNotContain("TrackGlow", gaugeAnimator, StringComparison.Ordinal);
+        Assert.DoesNotContain("FillGlow", gaugeAnimator, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ReleaseVersionPatternAllowsMinorTags()
     {
         var workflow = File.ReadAllText(FindRepositoryFile(Path.Combine(".github", "workflows", "release.yml")));
