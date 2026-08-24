@@ -25,8 +25,8 @@ public static class HudDisplayModelFactory
     {
         var activeModel = snapshot?.ActiveModel;
         var currentSessionModel = FindCurrentSessionModel(snapshot?.Models, activeModel);
-        var current = currentSessionModel?.Current ?? snapshot?.Primary;
-        var weekly = currentSessionModel?.Weekly ?? snapshot?.Secondary;
+        var current = currentSessionModel is null ? snapshot?.Primary : currentSessionModel.Current;
+        var weekly = currentSessionModel is null ? snapshot?.Secondary : currentSessionModel.Weekly;
         var hasRateLimitDisplay = currentSessionModel is not null
             || snapshot?.Primary is not null
             || snapshot?.Secondary is not null;
