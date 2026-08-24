@@ -374,6 +374,48 @@ public sealed class MappingTests
     }
 
     [Fact]
+    public void DoesNotPromoteSparkCurrentWindowIntoWeeklyOnlyCodexUsage()
+    {
+        var response = JsonSerializer.Deserialize<RpcRateLimitsResponse>(JsonSerializer.Serialize(new
+        {
+            rateLimits = new
+            {
+                limitId = "codex",
+                primary = new { usedPercent = 0.0, windowDurationMins = 10080, resetsAt = 1_800_100_000L },
+                secondary = (object?)null,
+                planType = "pro"
+            },
+            rateLimitsByLimitId = new Dictionary<string, object?>
+            {
+                ["codex_bengalfox"] = new
+                {
+                    limitId = "codex_bengalfox",
+                    limitName = "GPT-5.3-Codex-Spark",
+                    primary = new { usedPercent = 0.0, windowDurationMins = 300, resetsAt = 1_800_000_000L },
+                    secondary = new { usedPercent = 0.0, windowDurationMins = 10080, resetsAt = 1_800_100_000L }
+                },
+                ["codex"] = new
+                {
+                    limitId = "codex",
+                    primary = new { usedPercent = 0.0, windowDurationMins = 10080, resetsAt = 1_800_100_000L },
+                    secondary = (object?)null
+                }
+            }
+        }))!;
+
+        var usage = CodexUsageMapper.MapUsage(response, null, DateTimeOffset.UnixEpoch)!;
+
+        Assert.Null(usage.Primary);
+        Assert.Equal(10080, usage.Secondary!.WindowMinutes);
+        var generic = Assert.Single(usage.Models!, model => model.ModelName == "Codex");
+        Assert.Null(generic.Current);
+        Assert.Equal(10080, generic.Weekly!.WindowMinutes);
+        var spark = Assert.Single(usage.Models!, model => model.ModelName == "GPT-5.3 Codex Spark");
+        Assert.Equal(300, spark.Current!.WindowMinutes);
+        Assert.Equal(10080, spark.Weekly!.WindowMinutes);
+    }
+
+    [Fact]
     public void MapsNestedModelLimitContainer()
     {
         var response = JsonSerializer.Deserialize<RpcRateLimitsResponse>(JsonSerializer.Serialize(new
@@ -2271,6 +2313,29 @@ public sealed class ReleaseWorkflowTests
         Assert.Contains("Grid.SetRow(ModelContentPanel, 3);", hudView, StringComparison.Ordinal);
         Assert.Contains("AddLabelValueRow(content, 4, \"Account\"", hudView, StringComparison.Ordinal);
         Assert.Contains("Grid.SetRow(ErrorText, 5);", hudView, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FastTierHudPulsesOnlyTheLightningIndicators()
+    {
+        var hudView = File.ReadAllText(FindRepositoryFile(Path.Combine(
+            "src",
+            "WindexBar.Windows",
+            "Views",
+            "HudViewControl.cs")));
+        var gaugeAnimator = File.ReadAllText(FindRepositoryFile(Path.Combine(
+            "src",
+            "WindexBar.Windows",
+            "UI",
+            "GaugeAnimator.cs")));
+
+        Assert.Equal(2, Regex.Matches(hudView, "Text = \"\\\\u26A1\"").Count);
+        Assert.Contains("AutoReverse = true", hudView, StringComparison.Ordinal);
+        Assert.Contains("RepeatBehavior = RepeatBehavior.Forever", hudView, StringComparison.Ordinal);
+        Assert.Contains("indicator.Visibility = isFastTier ? Visibility.Visible : Visibility.Collapsed", hudView, StringComparison.Ordinal);
+        Assert.DoesNotContain("labelColor = isFastTier", hudView, StringComparison.Ordinal);
+        Assert.DoesNotContain("TrackGlow", gaugeAnimator, StringComparison.Ordinal);
+        Assert.DoesNotContain("FillGlow", gaugeAnimator, StringComparison.Ordinal);
     }
 
     [Fact]

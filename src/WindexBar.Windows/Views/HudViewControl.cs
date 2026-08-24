@@ -2,6 +2,8 @@ using WindexBar.Core.Presentation;
 using WindexBar.Windows.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 using static WindexBar.Windows.Views.FeatureViewHelpers;
 
 namespace WindexBar.Windows.Views;
@@ -86,14 +88,17 @@ internal sealed class HudViewControl : UserControl
         Grid.SetRow(ModelContentPanel, 3);
         content.Children.Add(ModelContentPanel);
 
-        CurrentGauge = AddWindowSection(ModelContentPanel, 0, "current", out var currentLabel, out var currentPercent, out var currentDetail);
+        CurrentGauge = AddWindowSection(ModelContentPanel, 0, "current", out var currentLabel, out var currentFastIndicator, out var currentFastGlow, out var currentPercent, out var currentDetail);
         CurrentLabelText = currentLabel;
         CurrentPercentText = currentPercent;
         CurrentDetailText = currentDetail;
-        WeeklyGauge = AddWindowSection(ModelContentPanel, 3, "weekly", out var weeklyLabel, out var weeklyPercent, out var weeklyDetail);
+        WeeklyGauge = AddWindowSection(ModelContentPanel, 3, "weekly", out var weeklyLabel, out var weeklyFastIndicator, out var weeklyFastGlow, out var weeklyPercent, out var weeklyDetail);
         WeeklyLabelText = weeklyLabel;
         WeeklyPercentText = weeklyPercent;
         WeeklyDetailText = weeklyDetail;
+        _fastIndicatorHosts = [currentFastIndicator, weeklyFastIndicator];
+        _fastIndicatorGlows = [currentFastGlow, weeklyFastGlow];
+        _fastIndicatorPulse = CreateFastIndicatorPulse(_fastIndicatorHosts, _fastIndicatorGlows);
 
         AccountText = AddLabelValueRow(content, 4, "Account", out var accountLabel);
         AccountLabelText = accountLabel;
@@ -133,6 +138,10 @@ internal sealed class HudViewControl : UserControl
     public TextBlock ErrorText { get; }
     public GaugeBar CurrentGauge { get; }
     public GaugeBar WeeklyGauge { get; }
+    private readonly Grid[] _fastIndicatorHosts;
+    private readonly TextBlock[] _fastIndicatorGlows;
+    private readonly Storyboard _fastIndicatorPulse;
+    private bool _isFastTierAppearanceActive;
 
     public void Bind(HudDisplayModel model, string currentLabel, string weeklyLabel)
     {
@@ -141,12 +150,47 @@ internal sealed class HudViewControl : UserControl
         MetaText.Visibility = string.IsNullOrWhiteSpace(model.Meta) ? Visibility.Collapsed : Visibility.Visible;
         AccountText.Text = model.Account;
         ErrorText.Text = model.Error;
-        CurrentLabelText.Text = currentLabel;
-        WeeklyLabelText.Text = weeklyLabel;
+        SetWindowLabels(currentLabel, weeklyLabel);
         CurrentPercentText.Text = model.Current.Percent;
         CurrentDetailText.Text = model.Current.Detail;
         WeeklyPercentText.Text = model.Weekly.Percent;
         WeeklyDetailText.Text = model.Weekly.Detail;
+    }
+
+    public void SetWindowLabels(string currentLabel, string weeklyLabel)
+    {
+        CurrentLabelText.Text = currentLabel;
+        WeeklyLabelText.Text = weeklyLabel;
+    }
+
+    public void SetFastTierAppearance(bool isFastTier)
+    {
+        if (_isFastTierAppearanceActive == isFastTier)
+        {
+            return;
+        }
+
+        _isFastTierAppearanceActive = isFastTier;
+        foreach (var indicator in _fastIndicatorHosts)
+        {
+            indicator.Visibility = isFastTier ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        if (isFastTier)
+        {
+            _fastIndicatorPulse.Begin();
+            return;
+        }
+
+        _fastIndicatorPulse.Stop();
+        foreach (var indicator in _fastIndicatorHosts)
+        {
+            indicator.Opacity = 0.58;
+        }
+        foreach (var glow in _fastIndicatorGlows)
+        {
+            glow.Opacity = 0.14;
+        }
     }
 
     private static GaugeBar AddWindowSection(
@@ -154,6 +198,8 @@ internal sealed class HudViewControl : UserControl
         int row,
         string key,
         out TextBlock label,
+        out Grid fastIndicator,
+        out TextBlock fastGlow,
         out TextBlock percent,
         out TextBlock detail)
     {
@@ -163,12 +209,42 @@ internal sealed class HudViewControl : UserControl
         Grid.SetRow(header, row);
         root.Children.Add(header);
 
+        var labelHost = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 4
+        };
+        header.Children.Add(labelHost);
         label = new TextBlock
         {
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             Foreground = Brush(0xFF, 0xED, 0xE7, 0xFF)
         };
-        header.Children.Add(label);
+        labelHost.Children.Add(label);
+        fastIndicator = new Grid
+        {
+            Visibility = Visibility.Collapsed,
+            Opacity = 0.58,
+            IsHitTestVisible = false,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        fastGlow = new TextBlock
+        {
+            Text = "\u26A1",
+            FontSize = 14,
+            Foreground = Brush(0xFF, 0xFF, 0xD6, 0x67),
+            Opacity = 0.14,
+            RenderTransformOrigin = new global::Windows.Foundation.Point(0.5, 0.5),
+            RenderTransform = new ScaleTransform { ScaleX = 1.28, ScaleY = 1.28 }
+        };
+        fastIndicator.Children.Add(fastGlow);
+        fastIndicator.Children.Add(new TextBlock
+        {
+            Text = "\u26A1",
+            FontSize = 14,
+            Foreground = Brush(0xFF, 0xFF, 0xB5, 0x3D)
+        });
+        labelHost.Children.Add(fastIndicator);
         percent = new TextBlock { FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
         Grid.SetColumn(percent, 1);
         header.Children.Add(percent);
@@ -212,6 +288,47 @@ internal sealed class HudViewControl : UserControl
         };
         track.Children.Add(sweep);
         return new GaugeBar(key, track, fill, sweep, target);
+    }
+
+    private static Storyboard CreateFastIndicatorPulse(
+        IReadOnlyList<Grid> indicators,
+        IReadOnlyList<TextBlock> glows)
+    {
+        var pulse = new Storyboard
+        {
+            AutoReverse = true,
+            RepeatBehavior = RepeatBehavior.Forever
+        };
+
+        foreach (var indicator in indicators)
+        {
+            var fade = new DoubleAnimation
+            {
+                From = 0.58,
+                To = 1,
+                Duration = new Duration(TimeSpan.FromMilliseconds(1150)),
+                EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
+            };
+            Storyboard.SetTarget(fade, indicator);
+            Storyboard.SetTargetProperty(fade, nameof(UIElement.Opacity));
+            pulse.Children.Add(fade);
+        }
+
+        foreach (var glow in glows)
+        {
+            var bloom = new DoubleAnimation
+            {
+                From = 0.14,
+                To = 0.52,
+                Duration = new Duration(TimeSpan.FromMilliseconds(1150)),
+                EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
+            };
+            Storyboard.SetTarget(bloom, glow);
+            Storyboard.SetTargetProperty(bloom, nameof(UIElement.Opacity));
+            pulse.Children.Add(bloom);
+        }
+
+        return pulse;
     }
 
     private static TextBlock AddLabelValueRow(Grid root, int row, string label, out TextBlock labelText)

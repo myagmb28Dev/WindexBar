@@ -37,8 +37,15 @@ public static class CodexUsageMapper
 
         var rootWindows = MapCanonicalWindows(rootLimits);
         var models = MapLimitBuckets(buckets);
-        var primary = rootWindows.Current ?? models.Select(model => model.Current).FirstOrDefault(window => window is not null);
-        var secondary = rootWindows.Weekly ?? models.Select(model => model.Weekly).FirstOrDefault(window => window is not null);
+        var genericModel = models.FirstOrDefault(model => IsSameModelName(model.ModelName, "Codex"));
+        var primary = rootWindows.Current ?? genericModel?.Current;
+        var secondary = rootWindows.Weekly ?? genericModel?.Weekly;
+
+        if (primary is null && secondary is null && genericModel is null && models.Count == 1)
+        {
+            primary = models[0].Current;
+            secondary = models[0].Weekly;
+        }
 
         if (primary is null
             && secondary is null

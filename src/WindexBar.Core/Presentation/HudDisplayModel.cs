@@ -25,14 +25,12 @@ public static class HudDisplayModelFactory
     {
         var activeModel = snapshot?.ActiveModel;
         var currentSessionModel = FindCurrentSessionModel(snapshot?.Models, activeModel);
-        var current = currentSessionModel?.Current ?? snapshot?.Primary;
-        var weekly = currentSessionModel?.Weekly ?? snapshot?.Secondary;
+        var current = currentSessionModel is null ? snapshot?.Primary : currentSessionModel.Current;
+        var weekly = currentSessionModel is null ? snapshot?.Secondary : currentSessionModel.Weekly;
         var hasRateLimitDisplay = currentSessionModel is not null
             || snapshot?.Primary is not null
             || snapshot?.Secondary is not null;
-        var header = hasRateLimitDisplay
-            ? FirstNonBlank(activeModel?.DisplayName, activeModel?.Model, "Codex")
-            : "Codex";
+        var header = hasRateLimitDisplay ? FormatHeader(activeModel) : "Codex";
 
         return new HudDisplayModel(
             header,
@@ -138,6 +136,16 @@ public static class HudDisplayModelFactory
 
     private static string FirstNonBlank(params string?[] values) =>
         values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
+
+    private static string FormatHeader(CodexModelSelection? activeModel)
+    {
+        var header = FirstNonBlank(activeModel?.DisplayName, activeModel?.Model, "Codex");
+        const string fastSuffix = " Fast";
+        return string.Equals(activeModel?.ServiceTier, "fast", StringComparison.OrdinalIgnoreCase)
+            && header.EndsWith(fastSuffix, StringComparison.OrdinalIgnoreCase)
+                ? header[..^fastSuffix.Length]
+                : header;
+    }
 
     private static bool IsKorean(string language) =>
         string.Equals(language, "ko", StringComparison.OrdinalIgnoreCase);

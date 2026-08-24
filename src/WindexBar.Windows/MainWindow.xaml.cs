@@ -44,8 +44,6 @@ public sealed partial class MainWindow : Window
     private const double ContentClientHeight = 334;
     private const double SettingsClientWidth = HudClientWidth;
     private const double KeyboardScrollStep = 36;
-    private const string FastIndicatorGlyph = "\u26A1";
-
     [StructLayout(LayoutKind.Sequential)]
     private struct NativePoint
     {
@@ -1978,13 +1976,11 @@ public sealed partial class MainWindow : Window
 
     private void ApplyWindowSectionLabels()
     {
-        HudView.CurrentLabelText.Text = WithFastIndicator(Text("Current", "\uD604\uC7AC"));
-        HudView.WeeklyLabelText.Text = WithFastIndicator(Text("Weekly", "\uC8FC\uAC04"));
+        HudView.SetWindowLabels(
+            Text("5 hours", "5\uC2DC\uAC04"),
+            Text("Weekly", "\uC8FC\uAC04"));
         UpdateSessionSortToggleAppearance();
     }
-
-    private string WithFastIndicator(string label) =>
-        _isFastServiceTier ? $"{label} {FastIndicatorGlyph}" : label;
 
     private void ApplyProgressBarTheme()
     {
@@ -2011,8 +2007,9 @@ public sealed partial class MainWindow : Window
         UpdateResetCreditDetails(snapshot?.RateLimitResetCredits);
         HudView.Bind(
             hud,
-            WithFastIndicator(Text("Current", "현재")),
-            WithFastIndicator(Text("Weekly", "주간")));
+            Text("5 hours", "5시간"),
+            Text("Weekly", "주간"));
+        HudView.SetFastTierAppearance(_isFastServiceTier);
         _gaugeAnimator.SetPrimaryTargets(hud.Current.TargetValue, hud.Weekly.TargetValue);
         UpdateSessionUsageView(snapshot?.Sessions);
         ApplyProgressBarTheme();

@@ -108,4 +108,30 @@ public sealed class PresentationModelTests
         Assert.Equal("Codex", model.Header);
         Assert.Equal("unknown", model.Current.Percent);
     }
+
+    [Fact]
+    public void HudModelDoesNotMixGenericAndModelSpecificWindows()
+    {
+        var now = new DateTimeOffset(2026, 8, 24, 1, 30, 0, TimeSpan.Zero);
+        var genericWeekly = new RateWindow(0, 10080, now.AddDays(7));
+        var snapshot = new UsageSnapshot(
+            new RateWindow(0, 300, now.AddHours(5)),
+            genericWeekly,
+            now,
+            null,
+            [
+                new ModelUsageSnapshot("Codex", null, genericWeekly),
+                new ModelUsageSnapshot(
+                    "GPT-5.3 Codex Spark",
+                    new RateWindow(0, 300, now.AddHours(5)),
+                    new RateWindow(0, 10080, now.AddDays(7)))
+            ],
+            new CodexModelSelection("gpt-5.6-sol", "xhigh", "fast", "GPT-5.6 Sol XHigh Fast", now));
+
+        var model = HudDisplayModelFactory.Create(snapshot, null, false, "en", now);
+
+        Assert.Equal("GPT-5.6 Sol XHigh", model.Header);
+        Assert.Equal("unknown", model.Current.Percent);
+        Assert.Equal("100%", model.Weekly.Percent);
+    }
 }
