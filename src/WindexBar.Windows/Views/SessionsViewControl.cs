@@ -5,6 +5,8 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 using static WindexBar.Windows.Views.FeatureViewHelpers;
 
 namespace WindexBar.Windows.Views;
@@ -216,13 +218,7 @@ internal sealed class SessionsViewControl : UserControl
         StyleConfig style)
     {
         var content = new StackPanel { Spacing = 3 };
-        content.Children.Add(new TextBlock
-        {
-            Text = $"[{session.DisplayName}]",
-            FontSize = 13,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            TextWrapping = TextWrapping.WrapWholeWords
-        });
+        content.Children.Add(CreateSessionNameMarquee(session.DisplayName));
         var contextHeader = new Grid { Margin = new Thickness(0, 2, 0, 0) };
         contextHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         contextHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -268,6 +264,88 @@ internal sealed class SessionsViewControl : UserControl
             args.Handled = true;
         };
         return card;
+    }
+
+    private static ScrollViewer CreateSessionNameMarquee(string displayName)
+    {
+        var transform = new TranslateTransform();
+        var nameText = new TextBlock
+        {
+            Text = $"[{displayName}]",
+            FontSize = 13,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            TextWrapping = TextWrapping.NoWrap,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            RenderTransform = transform
+        };
+        var nameViewport = new ScrollViewer
+        {
+            Content = nameText,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            HorizontalScrollMode = ScrollMode.Enabled,
+            VerticalScrollMode = ScrollMode.Disabled,
+            ZoomMode = ZoomMode.Disabled,
+            IsHorizontalRailEnabled = false,
+            IsVerticalRailEnabled = false,
+            IsTabStop = false
+        };
+
+        Storyboard? marquee = null;
+        var playedDuringCurrentHover = false;
+
+        nameViewport.PointerEntered += (_, _) =>
+        {
+            if (playedDuringCurrentHover)
+            {
+                return;
+            }
+
+            var overflow = Math.Max(0, nameViewport.ScrollableWidth);
+            if (overflow < 1)
+            {
+                return;
+            }
+
+            playedDuringCurrentHover = true;
+            var travelSeconds = Math.Clamp(overflow / 24d, 2.5, 12);
+            var movement = new DoubleAnimation
+            {
+                From = 0,
+                To = -overflow,
+                BeginTime = TimeSpan.FromMilliseconds(450),
+                Duration = new Duration(TimeSpan.FromSeconds(travelSeconds)),
+                EnableDependentAnimation = true
+            };
+            Storyboard.SetTarget(movement, transform);
+            Storyboard.SetTargetProperty(movement, nameof(TranslateTransform.X));
+
+            marquee = new Storyboard
+            {
+                AutoReverse = false,
+                RepeatBehavior = new RepeatBehavior(1)
+            };
+            marquee.Children.Add(movement);
+            marquee.Begin();
+        };
+        nameViewport.PointerExited += (_, args) =>
+        {
+            var position = args.GetCurrentPoint(nameViewport).Position;
+            if (position.X >= 0
+                && position.X <= nameViewport.ActualWidth
+                && position.Y >= 0
+                && position.Y <= nameViewport.ActualHeight)
+            {
+                return;
+            }
+
+            marquee?.Stop();
+            marquee = null;
+            transform.X = 0;
+            playedDuringCurrentHover = false;
+        };
+
+        return nameViewport;
     }
 
     private void RaiseSortChanged(bool projectFirst)
