@@ -11,25 +11,37 @@ public sealed class UsageStore : IDisposable
     private readonly ProviderDescriptor _codexDescriptor;
     private readonly WeeklyLimitImpactTracker? _weeklyLimitImpactTracker;
     private readonly RateLimitAlertTracker? _rateLimitAlertTracker;
+    private readonly string? _codexHomeOverride;
     private readonly object _rateLimitAlertLock = new();
     private IReadOnlyList<RateLimitThresholdAlert> _pendingRateLimitAlerts = [];
-    private readonly object _sessionIndexWatcherLock = new();
+    private readonly object _sessionStateWatcherLock = new();
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private readonly BackgroundRefreshDelayPolicy _refreshDelayPolicy = new();
+    private readonly List<FileSystemWatcher> _sessionStateWatchers = [];
     private CancellationTokenSource? _loopCts;
-    private CancellationTokenSource? _sessionIndexDebounceCts;
-    private FileSystemWatcher? _sessionIndexWatcher;
+    private CancellationTokenSource? _sessionStateDebounceCts;
 
     public UsageStore(
         SettingsStore settings,
         ProviderDescriptor? codexDescriptor = null,
         WeeklyLimitImpactTracker? weeklyLimitImpactTracker = null,
         RateLimitAlertTracker? rateLimitAlertTracker = null)
+        : this(settings, codexDescriptor, weeklyLimitImpactTracker, rateLimitAlertTracker, null)
+    {
+    }
+
+    internal UsageStore(
+        SettingsStore settings,
+        ProviderDescriptor? codexDescriptor,
+        WeeklyLimitImpactTracker? weeklyLimitImpactTracker,
+        RateLimitAlertTracker? rateLimitAlertTracker,
+        string? codexHomeOverride)
     {
         _settings = settings;
         _codexDescriptor = codexDescriptor ?? CodexProviderDescriptor.Create();
         _weeklyLimitImpactTracker = weeklyLimitImpactTracker;
         _rateLimitAlertTracker = rateLimitAlertTracker;
+        _codexHomeOverride = codexHomeOverride;
     }
 
     public UsageSnapshot? Snapshot { get; private set; }
@@ -132,7 +144,7 @@ public sealed class UsageStore : IDisposable
         var loopToken = loopCts.Token;
         _refreshDelayPolicy.Reset();
         _loopCts = loopCts;
-        StartSessionIndexWatcher();
+        StartSessionStateWatchers();
         _ = Task.Run(async () =>
         {
             try
@@ -151,15 +163,15 @@ public sealed class UsageStore : IDisposable
 
     public void StopBackgroundRefresh()
     {
-        StopSessionIndexWatcher();
+        StopSessionStateWatchers();
         _loopCts?.Cancel();
         _loopCts?.Dispose();
         _loopCts = null;
     }
 
-    private void StartSessionIndexWatcher()
+    private void StartSessionStateWatchers()
     {
-        var codexHome = Environment.GetEnvironmentVariable("CODEX_HOME");
+        var codexHome = _codexHomeOverride ?? Environment.GetEnvironmentVariable("CODEX_HOME");
         if (string.IsNullOrWhiteSpace(codexHome))
         {
             var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -171,27 +183,65 @@ public sealed class UsageStore : IDisposable
             return;
         }
 
-        _sessionIndexWatcher = new FileSystemWatcher(codexHome, "session_index.jsonl")
-        {
-            NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size
-        };
-        _sessionIndexWatcher.Changed += OnSessionIndexChanged;
-        _sessionIndexWatcher.Created += OnSessionIndexChanged;
-        _sessionIndexWatcher.Renamed += OnSessionIndexChanged;
-        _sessionIndexWatcher.EnableRaisingEvents = true;
+        AddSessionStateWatcher(
+            codexHome,
+            "session_index.jsonl",
+            includeSubdirectories: false,
+            NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
+            watchChanges: true);
+        AddSessionStateWatcher(
+            Path.Combine(codexHome, "sessions"),
+            "rollout-*.jsonl",
+            includeSubdirectories: true,
+            NotifyFilters.FileName,
+            watchChanges: false);
+        AddSessionStateWatcher(
+            Path.Combine(codexHome, "archived_sessions"),
+            "rollout-*.jsonl",
+            includeSubdirectories: true,
+            NotifyFilters.FileName,
+            watchChanges: false);
     }
 
-    private void OnSessionIndexChanged(object sender, FileSystemEventArgs args)
+    private void AddSessionStateWatcher(
+        string directory,
+        string filter,
+        bool includeSubdirectories,
+        NotifyFilters notifyFilter,
+        bool watchChanges)
+    {
+        if (!Directory.Exists(directory))
+        {
+            return;
+        }
+
+        var watcher = new FileSystemWatcher(directory, filter)
+        {
+            IncludeSubdirectories = includeSubdirectories,
+            NotifyFilter = notifyFilter
+        };
+        if (watchChanges)
+        {
+            watcher.Changed += OnSessionStateChanged;
+        }
+        watcher.Created += OnSessionStateChanged;
+        watcher.Deleted += OnSessionStateChanged;
+        watcher.Renamed += OnSessionStateChanged;
+        watcher.EnableRaisingEvents = true;
+        _sessionStateWatchers.Add(watcher);
+    }
+
+    private void OnSessionStateChanged(object sender, FileSystemEventArgs args)
     {
         CancellationTokenSource debounceCts;
-        lock (_sessionIndexWatcherLock)
+        lock (_sessionStateWatcherLock)
         {
-            _sessionIndexDebounceCts?.Cancel();
-            _sessionIndexDebounceCts?.Dispose();
+            _sessionStateDebounceCts?.Cancel();
+            _sessionStateDebounceCts?.Dispose();
             debounceCts = _loopCts is null
                 ? new CancellationTokenSource()
                 : CancellationTokenSource.CreateLinkedTokenSource(_loopCts.Token);
-            _sessionIndexDebounceCts = debounceCts;
+            _sessionStateDebounceCts = debounceCts;
         }
 
         _ = Task.Run(async () =>
@@ -207,23 +257,24 @@ public sealed class UsageStore : IDisposable
         }, debounceCts.Token);
     }
 
-    private void StopSessionIndexWatcher()
+    private void StopSessionStateWatchers()
     {
-        lock (_sessionIndexWatcherLock)
+        lock (_sessionStateWatcherLock)
         {
-            _sessionIndexDebounceCts?.Cancel();
-            _sessionIndexDebounceCts?.Dispose();
-            _sessionIndexDebounceCts = null;
+            _sessionStateDebounceCts?.Cancel();
+            _sessionStateDebounceCts?.Dispose();
+            _sessionStateDebounceCts = null;
 
-            if (_sessionIndexWatcher is not null)
+            foreach (var watcher in _sessionStateWatchers)
             {
-                _sessionIndexWatcher.EnableRaisingEvents = false;
-                _sessionIndexWatcher.Changed -= OnSessionIndexChanged;
-                _sessionIndexWatcher.Created -= OnSessionIndexChanged;
-                _sessionIndexWatcher.Renamed -= OnSessionIndexChanged;
-                _sessionIndexWatcher.Dispose();
-                _sessionIndexWatcher = null;
+                watcher.EnableRaisingEvents = false;
+                watcher.Changed -= OnSessionStateChanged;
+                watcher.Created -= OnSessionStateChanged;
+                watcher.Deleted -= OnSessionStateChanged;
+                watcher.Renamed -= OnSessionStateChanged;
+                watcher.Dispose();
             }
+            _sessionStateWatchers.Clear();
         }
     }
 
