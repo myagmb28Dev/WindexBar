@@ -87,6 +87,46 @@ public sealed class UsageStoreTests
         Assert.Same(resetCredits, store.Snapshot!.RateLimitResetCredits);
     }
 
+    [Fact]
+    public async Task ArchivingSessionFileTriggersPromptRefresh()
+    {
+        var codexHome = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var sessionDirectory = Path.Combine(codexHome, "sessions", "2026", "08", "25");
+        var archivedDirectory = Path.Combine(codexHome, "archived_sessions");
+        Directory.CreateDirectory(sessionDirectory);
+        Directory.CreateDirectory(archivedDirectory);
+        var activePath = Path.Combine(sessionDirectory, "rollout-test.jsonl");
+        var archivedPath = Path.Combine(archivedDirectory, "rollout-test.jsonl");
+        await File.WriteAllTextAsync(activePath, "{}");
+
+        var strategy = new CountingProviderFetchStrategy(
+            FetchResult(10, 55),
+            FetchResult(20, 45));
+        using var store = new UsageStore(
+            TestSettings(),
+            new ProviderDescriptor(new ProviderFetchPipeline([strategy])),
+            weeklyLimitImpactTracker: null,
+            rateLimitAlertTracker: null,
+            codexHomeOverride: codexHome);
+
+        try
+        {
+            store.StartBackgroundRefresh();
+            await WaitUntilAsync(() => store.Snapshot?.Primary?.RemainingPercent == 90);
+
+            File.Move(activePath, archivedPath);
+
+            await WaitUntilAsync(() => store.Snapshot?.Primary?.RemainingPercent == 80);
+            Assert.True(strategy.FetchCount >= 2);
+            Assert.Equal(80, store.Snapshot!.Primary!.RemainingPercent);
+        }
+        finally
+        {
+            store.StopBackgroundRefresh();
+            Directory.Delete(codexHome, recursive: true);
+        }
+    }
+
     private static SettingsStore TestSettings()
     {
         var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
@@ -121,5 +161,34 @@ public sealed class UsageStoreTests
         return new ProviderFetchResult(
             usage,
             new CreditsSnapshot(55, now));
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (!condition())
+        {
+            await Task.Delay(25, timeout.Token);
+        }
+    }
+
+    private sealed class CountingProviderFetchStrategy(
+        ProviderFetchResult initial,
+        ProviderFetchResult subsequent) : IProviderFetchStrategy
+    {
+        private int _fetchCount;
+
+        public int FetchCount => Volatile.Read(ref _fetchCount);
+
+        public Task<bool> IsAvailableAsync(ProviderFetchContext context, CancellationToken cancellationToken) =>
+            Task.FromResult(true);
+
+        public Task<ProviderFetchResult> FetchAsync(ProviderFetchContext context, CancellationToken cancellationToken)
+        {
+            var count = Interlocked.Increment(ref _fetchCount);
+            return Task.FromResult(count == 1 ? initial : subsequent);
+        }
+
+        public bool ShouldFallback(Exception error, ProviderFetchContext context) => false;
     }
 }
