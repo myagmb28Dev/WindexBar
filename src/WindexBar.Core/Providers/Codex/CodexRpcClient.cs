@@ -57,6 +57,41 @@ public sealed class CodexRpcClient : IAsyncDisposable
     public Task<RpcRateLimitsResponse> FetchRateLimitsAsync(CancellationToken cancellationToken) =>
         RequestAsync("account/rateLimits/read", null, _requestTimeout, WindexBarJsonContext.Default.RpcRateLimitsResponse, cancellationToken);
 
+    public async Task<RateLimitResetCreditRedemptionOutcome> ConsumeRateLimitResetCreditAsync(
+        string idempotencyKey,
+        string? creditId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(idempotencyKey))
+        {
+            throw new ArgumentException("An idempotency key is required.", nameof(idempotencyKey));
+        }
+
+        var parameters = new JsonObject
+        {
+            ["idempotencyKey"] = idempotencyKey.Trim()
+        };
+        if (!string.IsNullOrWhiteSpace(creditId))
+        {
+            parameters["creditId"] = creditId.Trim();
+        }
+
+        var response = await RequestAsync(
+            "account/rateLimitResetCredit/consume",
+            parameters,
+            _requestTimeout,
+            WindexBarJsonContext.Default.RpcConsumeRateLimitResetCreditResponse,
+            cancellationToken).ConfigureAwait(false);
+        return response.Outcome switch
+        {
+            "reset" => RateLimitResetCreditRedemptionOutcome.Reset,
+            "nothingToReset" => RateLimitResetCreditRedemptionOutcome.NothingToReset,
+            "noCredit" => RateLimitResetCreditRedemptionOutcome.NoCredit,
+            "alreadyRedeemed" => RateLimitResetCreditRedemptionOutcome.AlreadyRedeemed,
+            _ => throw new CodexRpcException($"Codex returned an unknown reset-credit outcome: {response.Outcome ?? "<null>"}.")
+        };
+    }
+
     public Task<RpcAccountResponse> FetchAccountAsync(CancellationToken cancellationToken) =>
         RequestAsync("account/read", null, _requestTimeout, WindexBarJsonContext.Default.RpcAccountResponse, cancellationToken);
 

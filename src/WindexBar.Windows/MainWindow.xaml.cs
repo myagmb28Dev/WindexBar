@@ -2,6 +2,7 @@ using WindexBar.Core.Config;
 using WindexBar.Core.Formatting;
 using WindexBar.Core.Models;
 using WindexBar.Core.Presentation;
+using WindexBar.Core.Providers.Codex;
 using WindexBar.Core.Refresh;
 using WindexBar.Core.Windowing;
 using WindexBar.Core.Updates;
@@ -68,7 +69,10 @@ public sealed partial class MainWindow : Window
     private readonly GaugeAnimator _gaugeAnimator;
     private readonly SettingsController _settingsController;
     private readonly CodexUpdateController _codexUpdateController;
+    private readonly RateLimitResetCreditRedemptionCoordinator _resetCreditRedemptionCoordinator;
     private bool _isFastServiceTier;
+    private bool _isResetCreditRedemptionInProgress;
+    private bool _isResetCreditDialogOpen;
     private DispatcherTimer? _sideBarHoverHideTimer;
     private DispatcherTimer? _sideBarHoverPollTimer;
     private DispatcherTimer? _modeLockNoticeHideTimer;
@@ -110,6 +114,9 @@ public sealed partial class MainWindow : Window
     private Window? _gaugeColorWindow;
     private Window? _sessionDetailsWindow;
     private Window? _resetCreditDetailsWindow;
+    private Button? _resetCreditDetailsCloseButton;
+    private StackPanel? _resetCreditRedemptionRows;
+    private RateLimitResetCredit? _pendingResetCredit;
     private Window? _shortcutWindow;
     private Window? _codexUpdateDetailsWindow;
     private Window? _appUpdatePromptWindow;
@@ -128,11 +135,14 @@ public sealed partial class MainWindow : Window
     public MainWindow(
         UsageStore usageStore,
         SettingsStore settingsStore,
-        CodexCliUpdateService codexCliUpdateService)
+        CodexCliUpdateService codexCliUpdateService,
+        IRateLimitResetCreditConsumer? resetCreditConsumer = null)
     {
         InitializeComponent();
         _usageStore = usageStore;
         _settingsStore = settingsStore;
+        _resetCreditRedemptionCoordinator = new RateLimitResetCreditRedemptionCoordinator(
+            resetCreditConsumer ?? new CodexRateLimitResetCreditConsumer());
         _dispatcher = WinUiDispatcherQueue.GetForCurrentThread();
         _gaugeAnimator = new GaugeAnimator(
             () => _settingsStore.Config.Style.GaugeAnimation,
@@ -1124,6 +1134,8 @@ public sealed partial class MainWindow : Window
 
         var resetDetails = _resetCreditDetailsWindow;
         _resetCreditDetailsWindow = null;
+        _resetCreditDetailsCloseButton = null;
+        _resetCreditRedemptionRows = null;
         resetDetails?.Close();
 
         var shortcut = _shortcutWindow;
@@ -1328,19 +1340,14 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var detailText = new TextBlock
-        {
-            Text = ResetCreditDetailsText.Text,
-            TextWrapping = TextWrapping.Wrap,
-            FontFamily = new FontFamily("Consolas"),
-            Foreground = Brush(0xFF, 0xED, 0xE7, 0xFF)
-        };
+        var creditRows = new StackPanel { Spacing = 8 };
+        _resetCreditRedemptionRows = creditRows;
         var scrollViewer = new ScrollViewer
         {
-            Height = 270,
+            Height = 245,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            Content = detailText
+            Content = creditRows
         };
         var panel = new StackPanel { Width = 330, Spacing = 9 };
         panel.Children.Add(new TextBlock
@@ -1366,26 +1373,297 @@ public sealed partial class MainWindow : Window
         };
         buttons.Children.Add(copyButton);
         buttons.Children.Add(closeButton);
+        _resetCreditDetailsCloseButton = closeButton;
         panel.Children.Add(buttons);
         AttachPopupScrollInput(panel, scrollViewer);
 
-        var popup = OwnedPopupWindow.Create(
+        Window popup = null!;
+        popup = OwnedPopupWindow.Create(
             this,
             Text("Reset credit bank", "리셋 크레딧 뱅크"),
             panel,
             PopupScale,
             logicalWidth: 360,
-            logicalHeight: 370);
+            logicalHeight: 370,
+            onDeactivated: () =>
+            {
+                if (!_isResetCreditRedemptionInProgress && !_isResetCreditDialogOpen)
+                {
+                    popup.Close();
+                }
+            });
         _resetCreditDetailsWindow = popup;
+        RenderResetCreditRedemptionRows(_usageStore.Snapshot?.RateLimitResetCredits);
         closeButton.Click += (_, _) => popup.Close();
         popup.Closed += (_, _) =>
         {
             if (ReferenceEquals(_resetCreditDetailsWindow, popup))
             {
                 _resetCreditDetailsWindow = null;
+                _resetCreditDetailsCloseButton = null;
+                _resetCreditRedemptionRows = null;
             }
         };
         popup.Activate();
+    }
+
+    private async Task ConfirmAndRedeemResetCreditAsync(RateLimitResetCredit? requestedCredit)
+    {
+        if (_isResetCreditRedemptionInProgress)
+        {
+            return;
+        }
+
+        var resetCredits = _usageStore.Snapshot?.RateLimitResetCredits;
+        if (resetCredits is null || resetCredits.AvailableCount <= 0)
+        {
+            RenderResetCreditRedemptionRows(resetCredits);
+            return;
+        }
+
+        var isRetry = _resetCreditRedemptionCoordinator.HasPendingAttempt;
+        var targetCredit = isRetry
+            ? _pendingResetCredit
+            : requestedCredit;
+        var targetDescription = RateLimitResetCreditFormatter.FormatRedemptionTarget(targetCredit, CurrentLanguage);
+        if (!await ShowResetCreditConfirmationAsync(isRetry, targetDescription))
+        {
+            return;
+        }
+
+        _isResetCreditRedemptionInProgress = true;
+        _pendingResetCredit = targetCredit;
+        RenderResetCreditRedemptionRows(resetCredits);
+        RateLimitResetCreditRedemptionAttempt? attempt = null;
+        try
+        {
+            attempt = await _resetCreditRedemptionCoordinator.RedeemAsync(
+                creditId: targetCredit?.Id,
+                _lifetimeCancellation.Token);
+            if (attempt.IsCompleted)
+            {
+                _pendingResetCredit = null;
+                await _usageStore.RefreshAsync(_lifetimeCancellation.Token);
+            }
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+            return;
+        }
+        finally
+        {
+            _isResetCreditRedemptionInProgress = false;
+            RenderResetCreditRedemptionRows(_usageStore.Snapshot?.RateLimitResetCredits);
+        }
+
+        if (attempt is null || _resetCreditDetailsWindow is null)
+        {
+            return;
+        }
+
+        var display = RateLimitResetCreditRedemptionDisplayModelFactory.Create(attempt, CurrentLanguage);
+        await ShowResetCreditResultAsync(display);
+    }
+
+    private async Task<bool> ShowResetCreditConfirmationAsync(bool isRetry, string targetDescription)
+    {
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var panel = new StackPanel { Width = 300, Spacing = 12 };
+        panel.Children.Add(CreateResetCreditDialogHeader(
+            isRetry ? "\u21bb" : "\u26a1",
+            isRetry
+                ? Text("Retry reset credit", "리셋 크레딧 다시 시도")
+                : Text("Use reset credit", "리셋 크레딧 사용")));
+        panel.Children.Add(FeatureViewHelpers.CreateDivider());
+        panel.Children.Add(CreateResetCreditTargetCard(targetDescription));
+        panel.Children.Add(new TextBlock
+        {
+            Text = isRetry
+                ? Text(
+                    "The same credit will be retried safely. Another credit cannot be consumed.",
+                    "같은 크레딧만 안전하게 다시 시도해. 다른 크레딧이 소비되지는 않아.")
+                : Text(
+                    "This resets an eligible Codex rate limit and cannot be undone.",
+                    "적용 가능한 Codex 사용 제한을 초기화하며, 이 작업은 되돌릴 수 없어."),
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = Brush(0xFF, 0xC9, 0xC1, 0xD5),
+            FontSize = 12
+        });
+
+        var cancelButton = FeatureViewHelpers.CreateCompactButton(Text("Cancel", "취소"));
+        var confirmButton = FeatureViewHelpers.CreateCompactButton(
+            isRetry ? Text("Retry", "다시 시도") : Text("Use credit", "크레딧 사용"));
+        confirmButton.Background = Brush(0xFF, 0x6F, 0x55, 0xB5);
+        confirmButton.Foreground = Brush(0xFF, 0xFF, 0xFF, 0xFF);
+        confirmButton.BorderBrush = Brush(0xFF, 0x9B, 0x84, 0xD6);
+        var buttons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Spacing = 7
+        };
+        buttons.Children.Add(cancelButton);
+        buttons.Children.Add(confirmButton);
+        panel.Children.Add(buttons);
+
+        Window popup = null!;
+        void Complete(bool confirmed)
+        {
+            if (completion.TrySetResult(confirmed))
+            {
+                popup.Close();
+            }
+        }
+
+        _isResetCreditDialogOpen = true;
+        popup = OwnedPopupWindow.Create(
+            this,
+            Text("Use reset credit", "리셋 크레딧 사용"),
+            panel,
+            PopupScale,
+            logicalWidth: 330,
+            logicalHeight: 245,
+            verticalOffset: 102,
+            onDeactivated: () => Complete(false));
+        cancelButton.Click += (_, _) => Complete(false);
+        confirmButton.Click += (_, _) => Complete(true);
+        popup.Closed += (_, _) => completion.TrySetResult(false);
+        popup.Activate();
+        try
+        {
+            return await completion.Task;
+        }
+        finally
+        {
+            _isResetCreditDialogOpen = false;
+        }
+    }
+
+    private async Task ShowResetCreditResultAsync(RateLimitResetCreditRedemptionDisplayModel display)
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var panel = new StackPanel { Width = 300, Spacing = 12 };
+        panel.Children.Add(CreateResetCreditDialogHeader(display.IsSuccess ? "\u2713" : "!", display.Title));
+        panel.Children.Add(FeatureViewHelpers.CreateDivider());
+        panel.Children.Add(new Border
+        {
+            Padding = new Thickness(12),
+            Background = Brush(0xFF, 0x29, 0x25, 0x31),
+            BorderBrush = display.IsSuccess
+                ? Brush(0xAA, 0x65, 0xB5, 0x91)
+                : Brush(0xAA, 0xB6, 0x83, 0x63),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10),
+            Child = new ScrollViewer
+            {
+                MaxHeight = 118,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                Content = new TextBlock
+                {
+                    Text = display.Message,
+                    TextWrapping = TextWrapping.Wrap,
+                    Foreground = Brush(0xFF, 0xED, 0xE7, 0xFF)
+                }
+            }
+        });
+        var closeButton = FeatureViewHelpers.CreateCompactButton(Text("Close", "닫기"));
+        closeButton.HorizontalAlignment = HorizontalAlignment.Right;
+        panel.Children.Add(closeButton);
+
+        Window popup = null!;
+        void Complete()
+        {
+            if (completion.TrySetResult())
+            {
+                popup.Close();
+            }
+        }
+
+        _isResetCreditDialogOpen = true;
+        popup = OwnedPopupWindow.Create(
+            this,
+            display.Title,
+            panel,
+            PopupScale,
+            logicalWidth: 330,
+            logicalHeight: 255,
+            verticalOffset: 112,
+            onDeactivated: Complete);
+        closeButton.Click += (_, _) => Complete();
+        popup.Closed += (_, _) => completion.TrySetResult();
+        popup.Activate();
+        try
+        {
+            await completion.Task;
+        }
+        finally
+        {
+            _isResetCreditDialogOpen = false;
+        }
+    }
+
+    private FrameworkElement CreateResetCreditDialogHeader(string glyph, string title)
+    {
+        var header = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 9
+        };
+        header.Children.Add(new Border
+        {
+            Width = 30,
+            Height = 30,
+            Background = Brush(0xFF, 0x38, 0x2F, 0x4A),
+            BorderBrush = Brush(0xFF, 0x8D, 0x72, 0xD2),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(15),
+            Child = new TextBlock
+            {
+                Text = glyph,
+                FontSize = 15,
+                Foreground = Brush(0xFF, 0xC7, 0xB6, 0xFF),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            }
+        });
+        header.Children.Add(new TextBlock
+        {
+            Text = title,
+            FontSize = 16,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = Brush(0xFF, 0xF7, 0xF3, 0xFF)
+        });
+        return header;
+    }
+
+    private FrameworkElement CreateResetCreditTargetCard(string targetDescription)
+    {
+        var content = new StackPanel { Spacing = 5 };
+        content.Children.Add(new TextBlock
+        {
+            Text = Text("SELECTED RESET CREDIT", "선택한 리셋 크레딧"),
+            FontSize = 10,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Foreground = Brush(0xFF, 0xAD, 0x96, 0xEA)
+        });
+        content.Children.Add(new TextBlock
+        {
+            Text = targetDescription,
+            TextWrapping = TextWrapping.Wrap,
+            FontFamily = new FontFamily("Consolas"),
+            Foreground = Brush(0xFF, 0xF2, 0xED, 0xFF)
+        });
+        return new Border
+        {
+            Padding = new Thickness(12, 10, 12, 10),
+            Background = Brush(0xFF, 0x29, 0x25, 0x31),
+            BorderBrush = Brush(0x99, 0x7D, 0x62, 0xC7),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10),
+            Child = content
+        };
     }
 
     private void ShowShortcutWindow(ShortcutTarget target)
@@ -2025,6 +2303,116 @@ public sealed partial class MainWindow : Window
     {
         ResetCreditSummaryText.Text = RateLimitResetCreditFormatter.FormatSummary(resetCredits, CurrentLanguage);
         ResetCreditDetailsText.Text = RateLimitResetCreditFormatter.FormatDetail(resetCredits, CurrentLanguage);
+        RenderResetCreditRedemptionRows(resetCredits);
+    }
+
+    private void RenderResetCreditRedemptionRows(RateLimitResetCreditsSnapshot? resetCredits)
+    {
+        if (_resetCreditRedemptionRows is null)
+        {
+            return;
+        }
+
+        _resetCreditRedemptionRows.Children.Clear();
+        var credits = resetCredits?.Credits ?? [];
+        var hasPendingAttempt = _resetCreditRedemptionCoordinator.HasPendingAttempt;
+        var pendingCreditId = _pendingResetCredit?.Id;
+
+        for (var index = 0; index < credits.Count; index++)
+        {
+            AddResetCreditRedemptionRow(
+                credits[index],
+                index + 1,
+                hasPendingAttempt,
+                pendingCreditId);
+        }
+
+        if (credits.Count == 0 && resetCredits is { AvailableCount: > 0 })
+        {
+            AddResetCreditRedemptionRow(
+                credit: null,
+                ordinal: 1,
+                hasPendingAttempt,
+                pendingCreditId);
+        }
+        else if (resetCredits is null)
+        {
+            _resetCreditRedemptionRows.Children.Add(new TextBlock
+            {
+                Text = UnknownText,
+                Foreground = Brush(0xFF, 0xED, 0xE7, 0xFF)
+            });
+        }
+        else if (resetCredits.AvailableCount <= 0)
+        {
+            _resetCreditRedemptionRows.Children.Add(new TextBlock
+            {
+                Text = Text("No reset credits held", "보유 리셋 크레딧 없음"),
+                Foreground = Brush(0xFF, 0xED, 0xE7, 0xFF)
+            });
+        }
+
+        if (_resetCreditDetailsCloseButton is not null)
+        {
+            _resetCreditDetailsCloseButton.IsEnabled = !_isResetCreditRedemptionInProgress;
+        }
+    }
+
+    private void AddResetCreditRedemptionRow(
+        RateLimitResetCredit? credit,
+        int ordinal,
+        bool hasPendingAttempt,
+        string? pendingCreditId)
+    {
+        if (_resetCreditRedemptionRows is null)
+        {
+            return;
+        }
+
+        var row = new Grid { ColumnSpacing = 10 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var title = credit is null
+            ? Text("Next available reset credit", "다음 사용 가능 리셋 크레딧")
+            : Text($"Reset credit {ordinal}", $"리셋 크레딧 {ordinal}");
+        var description = RateLimitResetCreditFormatter.FormatRedemptionTarget(credit, CurrentLanguage);
+        row.Children.Add(new TextBlock
+        {
+            Text = string.Join(Environment.NewLine, title, description),
+            TextWrapping = TextWrapping.Wrap,
+            VerticalAlignment = VerticalAlignment.Center,
+            FontFamily = new FontFamily("Consolas"),
+            Foreground = Brush(0xFF, 0xED, 0xE7, 0xFF)
+        });
+
+        var isPendingCredit = hasPendingAttempt
+            && string.Equals(credit?.Id, pendingCreditId, StringComparison.Ordinal);
+        var isActiveCredit = string.Equals(credit?.Id, _pendingResetCredit?.Id, StringComparison.Ordinal);
+        var useButton = FeatureViewHelpers.CreateCompactButton(
+            _isResetCreditRedemptionInProgress && isActiveCredit
+                ? Text("Using...", "사용 중...")
+                : isPendingCredit
+                    ? Text("Retry", "다시 시도")
+                    : Text("Use", "사용"));
+        useButton.HorizontalAlignment = HorizontalAlignment.Right;
+        useButton.VerticalAlignment = VerticalAlignment.Center;
+        useButton.IsEnabled = !_isResetCreditRedemptionInProgress
+            && _settingsStore.Codex.Enabled
+            && resetCreditsAvailable()
+            && (!hasPendingAttempt || isPendingCredit);
+        useButton.Click += async (_, _) => await ConfirmAndRedeemResetCreditAsync(credit);
+        SetToolTip(
+            Text(
+                "Uses this credit only when Codex has an eligible rate limit to reset.",
+                "Codex에 초기화 가능한 사용 제한이 있을 때만 이 크레딧을 사용해."),
+            useButton);
+        Grid.SetColumn(useButton, 1);
+        row.Children.Add(useButton);
+        _resetCreditRedemptionRows.Children.Add(row);
+
+        bool resetCreditsAvailable() =>
+            _usageStore.Snapshot?.RateLimitResetCredits is { AvailableCount: > 0 };
     }
 
     private string FormatCredits(CreditsSnapshot? credits)

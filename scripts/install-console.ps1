@@ -15,6 +15,10 @@ if ([string]::IsNullOrWhiteSpace($AppVersion)) {
 }
 $ArtifactsRoot = Join-Path $RootPath 'artifacts'
 $PublishDir = Join-Path $ArtifactsRoot 'install\win-x64'
+$BuildDirs = @(
+    (Join-Path $ArtifactsRoot 'build\WindexBar.Core'),
+    (Join-Path $ArtifactsRoot 'build\WindexBar.Windows')
+)
 $ProgramsRoot = Join-Path $env:LOCALAPPDATA 'Programs'
 $InstallDir = Join-Path $ProgramsRoot $AppName
 $AppExe = Join-Path $InstallDir 'WindexBar.Windows.exe'
@@ -382,6 +386,9 @@ try {
 
     Write-Bar 3 'Preparing install'
     Stop-RunningApp
+    foreach ($buildDir in $BuildDirs) {
+        Remove-IfSafe -Path $buildDir -Parent $ArtifactsRoot
+    }
     if ((Test-Path -LiteralPath $PublishDir) -and (Test-IsChildPath -Path $PublishDir -Parent $ArtifactsRoot)) {
         Remove-Item -LiteralPath $PublishDir -Recurse -Force
     }
@@ -415,7 +422,12 @@ try {
     if (-not $NoLaunch -and (Test-Path -LiteralPath $AppExe)) {
         Write-Bar 96 'Launching app'
         try {
-            Start-Process -FilePath $AppExe -WorkingDirectory $InstallDir
+            $launchedProcess = Start-Process -FilePath $AppExe -WorkingDirectory $InstallDir -PassThru
+            Start-Sleep -Milliseconds 1800
+            $launchedProcess.Refresh()
+            if ($launchedProcess.HasExited) {
+                throw "WindexBar exited during startup with code $($launchedProcess.ExitCode). Check $env:APPDATA\WindexBar\windexbar.log."
+            }
         }
         catch {
             $launchWarning = $_.Exception.Message

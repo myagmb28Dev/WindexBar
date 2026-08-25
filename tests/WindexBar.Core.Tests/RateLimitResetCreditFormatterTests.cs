@@ -87,4 +87,27 @@ public sealed class RateLimitResetCreditFormatterTests
         Assert.Equal("1\uAC1C \uBCF4\uC720" + Environment.NewLine + "\uB9CC\uB8CC \uC815\uBCF4 \uBBF8\uC81C\uACF5", RateLimitResetCreditFormatter.FormatSummary(snapshot, "ko", DateTimeOffset.UnixEpoch));
         Assert.Equal("\uB9CC\uB8CC \uC815\uBCF4 \uBBF8\uC81C\uACF5: 1\uAC1C", RateLimitResetCreditFormatter.FormatDetail(snapshot, "ko", DateTimeOffset.UnixEpoch));
     }
+
+    [Fact]
+    public void FormatsRedemptionTargetWithoutExposingInternalIds()
+    {
+        var now = DateTimeOffset.Parse("2026-07-10T12:00:00+09:00");
+        var earlierExpiry = DateTimeOffset.Parse("2026-08-01T05:05:10+09:00");
+        var laterExpiry = DateTimeOffset.Parse("2026-08-03T06:06:00+09:00");
+        var snapshot = new RateLimitResetCreditsSnapshot(
+            2,
+            now,
+            [
+                new RateLimitResetCredit("later", now, laterExpiry, "codexRateLimits", "available", null, null),
+                new RateLimitResetCredit("earlier", now, earlierExpiry, "codexRateLimits", "available", null, null)
+            ]);
+
+        var target = snapshot.Credits[0];
+        var localExpiry = earlierExpiry.ToLocalTime().ToString("yy.M.dd H:mm", CultureInfo.InvariantCulture);
+
+        Assert.Equal("earlier", target.Id);
+        var display = RateLimitResetCreditFormatter.FormatRedemptionTarget(target, "en");
+        Assert.Equal($"Expires {localExpiry}", display);
+        Assert.DoesNotContain(target.Id, display, StringComparison.Ordinal);
+    }
 }

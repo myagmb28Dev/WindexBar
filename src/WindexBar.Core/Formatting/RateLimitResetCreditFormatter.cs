@@ -101,6 +101,26 @@ public static class RateLimitResetCreditFormatter
         return Format(resetCredits, language, now);
     }
 
+    public static string FormatRedemptionTarget(
+        RateLimitResetCredit? credit,
+        string? language)
+    {
+        var isKorean = IsKorean(language);
+        if (credit is null)
+        {
+            return isKorean
+                ? "Codex가 다음 사용 가능 크레딧을 선택해"
+                : "Codex will select the next available credit";
+        }
+
+        var expiration = credit.ExpiresAt is { } expiresAt
+            ? FormatExpiryBucket(expiresAt, language)
+            : isKorean
+                ? "만료 정보 미제공"
+                : "Expiration unavailable";
+        return expiration;
+    }
+
     private static string FormatDayCode(DateTimeOffset target, DateTimeOffset now)
     {
         var days = Math.Max(0, (int)Math.Ceiling((target - now).TotalDays));
