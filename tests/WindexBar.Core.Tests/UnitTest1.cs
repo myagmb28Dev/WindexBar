@@ -1818,6 +1818,21 @@ public sealed class InstallerBuildScriptTests
         Assert.Contains("-QuietMissingCertificate", installScript, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("[switch]$QuietMissingCertificate", signScript, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("if ($QuietMissingCertificate)", signScript, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("-CodeSigningCert", signScript, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("1.3.6.1.5.5.7.3.3", signScript, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ConsoleInstallRebuildsWinUiArtifactsAndDetectsImmediateStartupFailure()
+    {
+        var installScript = File.ReadAllText(FindRepositoryFile(Path.Combine("scripts", "install-console.ps1")));
+
+        Assert.Contains("build\\WindexBar.Core", installScript, StringComparison.Ordinal);
+        Assert.Contains("build\\WindexBar.Windows", installScript, StringComparison.Ordinal);
+        Assert.Contains("Remove-IfSafe -Path $buildDir -Parent $ArtifactsRoot", installScript, StringComparison.Ordinal);
+        Assert.Contains("Start-Process -FilePath $AppExe -WorkingDirectory $InstallDir -PassThru", installScript, StringComparison.Ordinal);
+        Assert.Contains("$launchedProcess.HasExited", installScript, StringComparison.Ordinal);
+        Assert.Contains("WindexBar exited during startup", installScript, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2182,6 +2197,7 @@ public sealed class ReleaseWorkflowTests
         Assert.Contains("await _codexUpdateController.CheckAsync", mainWindow, StringComparison.Ordinal);
         Assert.Contains("StartupCompleted?.Invoke(this, EventArgs.Empty);", mainWindow, StringComparison.Ordinal);
         Assert.Contains("_statusWindow.StartupCompleted += OnStatusWindowStartupCompleted;", trayService, StringComparison.Ordinal);
+        Assert.Contains("if (_started)", trayService, StringComparison.Ordinal);
 
         var constructorStart = trayService.IndexOf("public TrayIconService(", StringComparison.Ordinal);
         var startMethod = trayService.IndexOf("public void Start()", constructorStart, StringComparison.Ordinal);

@@ -11,6 +11,7 @@ namespace WindexBar.Core;
     GenerationMode = JsonSourceGenerationMode.Metadata)]
 [JsonSerializable(typeof(WindexBarConfig))]
 [JsonSerializable(typeof(RpcRateLimitsResponse))]
+[JsonSerializable(typeof(RpcConsumeRateLimitResetCreditResponse))]
 [JsonSerializable(typeof(RpcAccountResponse))]
 [JsonSerializable(typeof(RpcThreadListResponse))]
 [JsonSerializable(typeof(WeeklyLimitImpactState))]

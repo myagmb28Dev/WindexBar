@@ -119,6 +119,12 @@ public sealed class RpcRateLimitResetCredit
     public string? Description { get; set; }
 }
 
+public sealed class RpcConsumeRateLimitResetCreditResponse
+{
+    [JsonPropertyName("outcome")]
+    public string? Outcome { get; set; }
+}
+
 public sealed class RpcAccountResponse
 {
     [JsonPropertyName("account")]

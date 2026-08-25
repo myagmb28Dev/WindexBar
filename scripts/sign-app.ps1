@@ -21,8 +21,12 @@ function Write-SignWarning {
 function Get-WindexBarCodeSigningCertificate {
     $now = Get-Date
     $certs = @(
-        Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert -ErrorAction SilentlyContinue |
-            Where-Object { $_.HasPrivateKey -and $_.NotAfter -gt $now }
+        Get-ChildItem -LiteralPath Cert:\CurrentUser\My -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.HasPrivateKey -and
+                $_.NotAfter -gt $now -and
+                $_.Extensions.Oid.Value -contains '1.3.6.1.5.5.7.3.3'
+            }
     )
 
     if ($certs.Count -eq 0) {

@@ -23,6 +23,7 @@
 - Live updates for Codex-generated and manually edited session names, with project-free conversations shown under `No project`.
 - Banked rate-limit reset credit count with exact expiration details from Codex app-server when provided.
 - Reset-credit details grouped by exact expiration time, with unavailable expirations shown explicitly.
+- Confirmation-gated reset-credit redemption with idempotent retries, result-specific feedback, and an authoritative post-redemption refresh.
 - Remaining ChatGPT credits when Codex exposes the balance.
 - A bookmark-style sidebar shown beside the left edge of the content card without resizing the main window; title-click and shortcuts pin it, while opt-in hover reveal locks those sidebar toggles.
 - A dedicated Style sidebar for gauge thickness, a pop-up fill color picker, and animation controls.
