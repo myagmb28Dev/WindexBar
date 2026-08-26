@@ -1911,7 +1911,7 @@ public sealed class InstallerBuildScriptTests
     [Fact]
     public void PublishUsesStableWinUiReleaseOptions()
     {
-        var script = File.ReadAllText(FindRepositoryFile("build-installer.cmd"));
+        var script = File.ReadAllText(FindRepositoryFile(Path.Combine("scripts", "build-installer.cmd")));
 
         Assert.Contains("-p:PublishTrimmed=false", script, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("-p:PublishReadyToRun=false", script, StringComparison.OrdinalIgnoreCase);
@@ -1922,11 +1922,11 @@ public sealed class InstallerBuildScriptTests
     [Fact]
     public void RunCommandSupportsWatchRestartMode()
     {
-        var runScript = File.ReadAllText(FindRepositoryFile("run.cmd"));
+        var runScript = File.ReadAllText(FindRepositoryFile(Path.Combine("scripts", "run.cmd")));
         var watchScript = File.ReadAllText(FindRepositoryFile(Path.Combine("scripts", "run-watch.ps1")));
 
         Assert.Contains("--watch", runScript, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("scripts\\run-watch.ps1", runScript, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("run-watch.ps1", runScript, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("FileSystemWatcher", watchScript, StringComparison.Ordinal);
         Assert.Contains("Restart-WindexBar", watchScript, StringComparison.Ordinal);
         Assert.Contains("Stop-WindexBar", watchScript, StringComparison.Ordinal);
@@ -2407,7 +2407,7 @@ public sealed class ReleaseWorkflowTests
             "src",
             "WindexBar.Windows",
             "WindexBar.Windows.csproj")));
-        var installerBuild = File.ReadAllText(FindRepositoryFile("build-installer.cmd"));
+        var installerBuild = File.ReadAllText(FindRepositoryFile(Path.Combine("scripts", "build-installer.cmd")));
 
         Assert.Contains("<PublishTrimmed>False</PublishTrimmed>", project, StringComparison.Ordinal);
         Assert.DoesNotContain("<PublishTrimmed Condition=", project, StringComparison.Ordinal);

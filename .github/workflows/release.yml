@@ -98,7 +98,7 @@ jobs:
 
       - name: Build installer
         shell: cmd
-        run: build-installer.cmd ${{ steps.release.outputs.version }}
+        run: .\scripts\build-installer.cmd ${{ steps.release.outputs.version }}
 
       - name: Create signed update manifest
         id: installer

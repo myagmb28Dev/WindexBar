@@ -17,6 +17,7 @@
 AppId={{7E3F5B71-3E21-4F27-8C7F-CCDF69C0C7BD}
 AppName={#AppName}
 AppVersion={#AppVersion}
+AppVerName={#AppName}
 AppPublisher=WindexBar
 AppPublisherURL=https://github.com/myagmb28Dev/WindexBar
 AppSupportURL=https://github.com/myagmb28Dev/WindexBar/issues
@@ -49,6 +50,10 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 [InstallDelete]
 Type: filesandordirs; Name: "{localappdata}\Programs\WindexBar"
 Type: filesandordirs; Name: "{userprograms}\WindexBar"
+Type: files; Name: "{app}\uninstall.ps1"
+
+[Registry]
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Uninstall\WindexBar"; Flags: deletekey
 
 [Icons]
 Name: "{group}\WindexBar"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppExeName}"
@@ -69,4 +74,24 @@ Type: filesandordirs; Name: "{app}"
 function IsAutoUpdate: Boolean;
 begin
   Result := CompareText(ExpandConstant('{param:autoupdate|0}'), '1') = 0;
+end;
+
+procedure CleanLegacyUninstallEntries;
+begin
+  if RegKeyExists(HKEY_CURRENT_USER, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\WindexBar') then
+  begin
+    RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\WindexBar');
+  end;
+  if RegKeyExists(HKEY_CURRENT_USER_64, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\WindexBar') then
+  begin
+    RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER_64, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\WindexBar');
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if (CurStep = ssInstall) or (CurStep = ssPostInstall) then
+  begin
+    CleanLegacyUninstallEntries;
+  end;
 end;

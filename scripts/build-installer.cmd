@@ -1,7 +1,8 @@
 @echo off
 setlocal
 
-set "ROOT=%~dp0"
+set "SCRIPT_DIR=%~dp0"
+for %%I in ("%SCRIPT_DIR%..") do set "ROOT=%%~fI\"
 set "APP_VERSION=%~1"
 if not defined APP_VERSION for /f "usebackq delims=" %%V in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$xml = [xml](Get-Content -Raw '%ROOT%Directory.Build.props'); $xml.Project.PropertyGroup.Version.InnerText"`) do set "APP_VERSION=%%V"
 if not defined APP_VERSION (

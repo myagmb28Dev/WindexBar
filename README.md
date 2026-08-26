@@ -45,11 +45,11 @@ WinGet installs the latest published version. Open WindexBar from the Start menu
 Source install:
 
 ```powershell
-.\install.cmd
+.\scripts\install.cmd
 ```
 
 Source install launches WindexBar after installation by default.
-Use `.\install.cmd -NoLaunch` to install without launching, or `.\install.cmd -NoStartup` to skip the Windows startup shortcut.
+Use `.\scripts\install.cmd -NoLaunch` to install without launching, or `.\scripts\install.cmd -NoStartup` to skip the Windows startup shortcut.
 
 ## Usage
 
@@ -67,12 +67,12 @@ Run the app, then WindexBar appears as an icon in the system tray.
 
 - SDK: `.NET SDK 10.0.301` (`global.json`)
 - Local SDK install: [dotnet-install scripts](https://learn.microsoft.com/dotnet/core/tools/dotnet-install-script)
-- If the local SDK is missing, `run.cmd` and `build-installer.cmd` use the system-installed `dotnet` or the `dotnet` on `PATH`.
+- If the local SDK is missing, `scripts\run.cmd` and `scripts\build-installer.cmd` use the system-installed `dotnet` or the `dotnet` on `PATH`.
 
 Run:
 
 ```powershell
-.\run.cmd
+.\scripts\run.cmd
 ```
 
 Test:

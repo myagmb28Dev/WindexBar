@@ -1,6 +1,6 @@
 @echo off
 setlocal
-pushd "%~dp0"
+pushd "%~dp0.."
 set "DOTNET=.dotnet\dotnet.exe"
 if not exist "%DOTNET%" if exist "%ProgramFiles%\dotnet\dotnet.exe" set "DOTNET=%ProgramFiles%\dotnet\dotnet.exe"
 if not exist "%DOTNET%" set "DOTNET=dotnet"
@@ -10,7 +10,7 @@ set "APP_EXE=%RUN_DIR%\WindexBar.Windows.exe"
 set "PUBLISH_ARGS=publish %PROJECT% -c Debug -r win-x64 --self-contained true -p:WindowsPackageType=None -p:WindowsAppSDKSelfContained=true -p:PublishReadyToRun=false -p:PublishTrimmed=false -p:NuGetAudit=false -o %RUN_DIR%"
 
 if /i "%~1"=="--watch" (
-    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\run-watch.ps1"
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0run-watch.ps1"
     set "EXITCODE=%ERRORLEVEL%"
     popd
     exit /b %EXITCODE%
