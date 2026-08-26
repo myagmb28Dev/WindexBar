@@ -175,26 +175,26 @@ public sealed class RateLimitResetCreditRedemptionTests
     [Fact]
     public void ResetCreditPopupRequiresConfirmationAndRefreshesAuthoritativeState()
     {
-        var mainWindow = File.ReadAllText(FindRepositoryFile(
-            Path.Combine("src", "WindexBar.Windows", "MainWindow.xaml.cs")));
-        var confirmationIndex = mainWindow.IndexOf("await ShowResetCreditConfirmationAsync", StringComparison.Ordinal);
-        var redemptionIndex = mainWindow.IndexOf("_resetCreditRedemptionCoordinator.RedeemAsync", StringComparison.Ordinal);
+        var resetCreditBank = File.ReadAllText(FindRepositoryFile(
+            Path.Combine("src", "WindexBar.Windows", "Dialogs", "ResetCreditBankDialog.cs")));
+        var confirmationIndex = resetCreditBank.IndexOf("await ShowConfirmationAsync", StringComparison.Ordinal);
+        var redemptionIndex = resetCreditBank.IndexOf("_redemptionCoordinator.RedeemAsync", StringComparison.Ordinal);
 
-        Assert.Contains("AddResetCreditRedemptionRow", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("Grid.SetColumn(useButton, 1)", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("ConfirmAndRedeemResetCreditAsync(credit)", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("FormatRedemptionTarget", mainWindow, StringComparison.Ordinal);
-        Assert.DoesNotContain("Credit ID:", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("OwnedPopupWindow.Create", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("CreateResetCreditTargetCard", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("TaskCompletionSource<bool>", mainWindow, StringComparison.Ordinal);
-        Assert.DoesNotContain("var confirmation = new ContentDialog", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("AddResetCreditRedemptionRow", resetCreditBank, StringComparison.Ordinal);
+        Assert.Contains("Grid.SetColumn(useButton, 1)", resetCreditBank, StringComparison.Ordinal);
+        Assert.Contains("ConfirmAndRedeemResetCreditAsync(credit)", resetCreditBank, StringComparison.Ordinal);
+        Assert.Contains("FormatRedemptionTarget", resetCreditBank, StringComparison.Ordinal);
+        Assert.DoesNotContain("Credit ID:", resetCreditBank, StringComparison.Ordinal);
+        Assert.Contains("OwnedPopupWindow.Create", resetCreditBank, StringComparison.Ordinal);
+        Assert.Contains("CreateTargetCard", resetCreditBank, StringComparison.Ordinal);
+        Assert.Contains("TaskCompletionSource<bool>", resetCreditBank, StringComparison.Ordinal);
+        Assert.DoesNotContain("var confirmation = new ContentDialog", resetCreditBank, StringComparison.Ordinal);
         Assert.True(confirmationIndex >= 0 && redemptionIndex > confirmationIndex);
-        Assert.Contains("_isResetCreditRedemptionInProgress", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("creditId: targetCredit?.Id", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("await _usageStore.RefreshAsync", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("RateLimitResetCreditRedemptionDisplayModelFactory.Create", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("_resetCreditDetailsCloseButton.IsEnabled = !_isResetCreditRedemptionInProgress", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("_isRedemptionInProgress", resetCreditBank, StringComparison.Ordinal);
+        Assert.Contains("creditId: targetCredit?.Id", resetCreditBank, StringComparison.Ordinal);
+        Assert.Contains("await _usageStore.RefreshAsync", resetCreditBank, StringComparison.Ordinal);
+        Assert.Contains("RateLimitResetCreditRedemptionDisplayModelFactory.Create", resetCreditBank, StringComparison.Ordinal);
+        Assert.Contains("_closeButton.IsEnabled = !_isRedemptionInProgress", resetCreditBank, StringComparison.Ordinal);
     }
 
     private static string Reply(int id, object result) =>

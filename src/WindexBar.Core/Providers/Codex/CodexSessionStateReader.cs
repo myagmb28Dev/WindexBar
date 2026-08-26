@@ -135,6 +135,10 @@ public static class CodexSessionStateReader
         return latestState with
         {
             Sessions = sessions
+                .GroupBy(session => session.SessionId, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group
+                    .OrderByDescending(session => session.UpdatedAt)
+                    .First())
                 .OrderByDescending(session => session.UpdatedAt)
                 .ToArray()
         };
