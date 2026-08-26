@@ -332,6 +332,11 @@ function Set-UninstallRegistryValue {
 function Register-UninstallEntry {
     param([string]$IconPath)
 
+    $innoUninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{7E3F5B71-3E21-4F27-8C7F-CCDF69C0C7BD}_is1"
+    if (Test-Path -LiteralPath $innoUninstallKey) {
+        Remove-Item -LiteralPath $innoUninstallKey -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
     $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $uninstallCommand = '"{0}" -NoProfile -ExecutionPolicy Bypass -File "{1}"' -f $powershell, $UninstallScript
     $quietUninstallCommand = $uninstallCommand + ' -Quiet'

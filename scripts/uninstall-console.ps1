@@ -10,7 +10,8 @@ $ProgramsMenuRoot = [Environment]::GetFolderPath([Environment+SpecialFolder]::Pr
 $StartupRoot = [Environment]::GetFolderPath([Environment+SpecialFolder]::Startup)
 $DesktopRoot = [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)
 $UninstallRegistryKeys = @(
-    "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$AppName"
+    "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$AppName",
+    "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{7E3F5B71-3E21-4F27-8C7F-CCDF69C0C7BD}_is1"
 )
 
 function Test-IsChildPath {
