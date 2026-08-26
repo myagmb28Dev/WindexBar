@@ -1575,6 +1575,72 @@ public sealed class CodexSessionStateReaderTests
     }
 
     [Fact]
+    public async Task CodexCliFetchKeepsOnlyLatestRolloutForDuplicateSessionId()
+    {
+        var (binDir, codexHome, projectPath) = CreateDuplicateSessionFixture();
+        var transportFactory = new QueueCodexRpcTransportFactory(
+        [
+            [
+                RpcReply(1, new { ok = true }),
+                RpcReply(2, new
+                {
+                    rateLimits = new
+                    {
+                        primary = new { usedPercent = 0.0, windowDurationMins = 10080, resetsAt = 1_800_100_000L },
+                        secondary = (object?)null,
+                        planType = "pro"
+                    }
+                }),
+                RpcReply(3, new { account = new { type = "chatgpt", planType = "pro" } }),
+                RpcReply(4, new
+                {
+                    data = new[] { new { id = "shared-session", name = "Gemini tracker app", cwd = projectPath } },
+                    nextCursor = (string?)null
+                })
+            ]
+        ]);
+        var strategy = new CodexCliFetchStrategy(transportFactory);
+        var context = CreateDuplicateSessionContext(binDir, codexHome, TimeSpan.FromSeconds(1));
+
+        var result = await strategy.FetchAsync(context, CancellationToken.None);
+
+        var session = Assert.Single(result.Usage.Sessions!);
+        Assert.Equal("shared-session", session.SessionId);
+        Assert.Equal("Gemini tracker app", session.SessionName);
+        Assert.Equal(30_000, session.TokenUsage.Total!.TotalTokens);
+    }
+
+    [Fact]
+    public async Task CodexCliFetchKeepsOnlyLatestRolloutWhenThreadListFails()
+    {
+        var (binDir, codexHome, _) = CreateDuplicateSessionFixture();
+        var transportFactory = new QueueCodexRpcTransportFactory(
+        [
+            [
+                RpcReply(1, new { ok = true }),
+                RpcReply(2, new
+                {
+                    rateLimits = new
+                    {
+                        primary = new { usedPercent = 0.0, windowDurationMins = 10080, resetsAt = 1_800_100_000L },
+                        secondary = (object?)null,
+                        planType = "pro"
+                    }
+                }),
+                RpcReply(3, new { account = new { type = "chatgpt", planType = "pro" } })
+            ]
+        ]);
+        var strategy = new CodexCliFetchStrategy(transportFactory);
+        var context = CreateDuplicateSessionContext(binDir, codexHome, TimeSpan.FromMilliseconds(20));
+
+        var result = await strategy.FetchAsync(context, CancellationToken.None);
+
+        var session = Assert.Single(result.Usage.Sessions!);
+        Assert.Equal("shared-session", session.SessionId);
+        Assert.Equal(30_000, session.TokenUsage.Total!.TotalTokens);
+    }
+
+    [Fact]
     public async Task CodexCliFetchExcludesDeletedAndUnavailableProjectSessions()
     {
         var testRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -1747,6 +1813,88 @@ public sealed class CodexSessionStateReaderTests
     {
         ["CODEX_HOME"] = codexHome
     };
+
+    private static (string BinDir, string CodexHome, string ProjectPath) CreateDuplicateSessionFixture()
+    {
+        var testRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var binDir = Path.Combine(testRoot, "bin");
+        var codexHome = Path.Combine(testRoot, "codex-home");
+        var sessionDir = Path.Combine(codexHome, "sessions", "2026", "08", "26");
+        var projectPath = Path.Combine(testRoot, "TwinQuota");
+        Directory.CreateDirectory(binDir);
+        Directory.CreateDirectory(sessionDir);
+        Directory.CreateDirectory(projectPath);
+        File.WriteAllText(Path.Combine(binDir, "codex.cmd"), "@echo off\r\n");
+
+        WriteDuplicateSession(
+            Path.Combine(sessionDir, "rollout-original.jsonl"),
+            projectPath,
+            "2026-08-26T01:05:00Z",
+            10_000);
+        WriteDuplicateSession(
+            Path.Combine(sessionDir, "rollout-resumed.jsonl"),
+            projectPath,
+            "2026-08-26T02:05:00Z",
+            30_000);
+        return (binDir, codexHome, projectPath);
+    }
+
+    private static void WriteDuplicateSession(
+        string path,
+        string projectPath,
+        string updatedAt,
+        long totalTokens)
+    {
+        File.WriteAllLines(
+            path,
+            [
+                JsonSerializer.Serialize(new
+                {
+                    timestamp = "2026-08-26T01:00:00Z",
+                    type = "session_meta",
+                    payload = new
+                    {
+                        id = "shared-session",
+                        thread_source = "user",
+                        cwd = projectPath,
+                        source = "desktop"
+                    }
+                }),
+                JsonSerializer.Serialize(new
+                {
+                    timestamp = updatedAt,
+                    type = "event_msg",
+                    payload = new
+                    {
+                        type = "token_count",
+                        info = new
+                        {
+                            total_token_usage = new { total_tokens = totalTokens },
+                            last_token_usage = new { total_tokens = totalTokens / 2 },
+                            model_context_window = 256000
+                        }
+                    }
+                })
+            ]);
+    }
+
+    private static ProviderFetchContext CreateDuplicateSessionContext(
+        string binDir,
+        string codexHome,
+        TimeSpan requestTimeout) =>
+        new(
+            UsageProvider.Codex,
+            new Dictionary<string, string>
+            {
+                ["PATH"] = binDir,
+                ["PATHEXT"] = ".CMD",
+                ["CODEX_HOME"] = codexHome
+            },
+            IncludeCredits: true,
+            InitializeTimeout: TimeSpan.FromSeconds(1),
+            RequestTimeout: requestTimeout);
+
+    private static string RpcReply(int id, object result) => JsonSerializer.Serialize(new { id, result });
 }
 
 public sealed class InstallerBuildScriptTests
