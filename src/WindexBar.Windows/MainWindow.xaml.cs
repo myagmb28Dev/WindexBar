@@ -167,7 +167,7 @@ public sealed partial class MainWindow : Window
 
         Closed += (_, _) =>
         {
-            _gaugeColorPickerPopup.Close();
+            CloseGaugeColorWindow();
             CloseAuxiliaryWindows();
             _codexUpdateController.Dispose();
             _sidebarController.Dispose();
@@ -397,7 +397,7 @@ public sealed partial class MainWindow : Window
     {
         if (closeGaugeColor)
         {
-            _gaugeColorPickerPopup.Close();
+            CloseGaugeColorWindow();
         }
 
         CloseAuxiliaryWindows();
@@ -647,7 +647,7 @@ public sealed partial class MainWindow : Window
         {
             _gaugeAnimator.SetActive(false);
             _sidebarController.OnWindowVisibilityChanged(false);
-            _gaugeColorPickerPopup.Close();
+            CloseGaugeColorWindow();
             CloseAuxiliaryWindows();
             return;
         }
@@ -686,25 +686,42 @@ public sealed partial class MainWindow : Window
     internal void ShowModeLockedNotice(string title, string message) =>
         _sidebarController.ShowModeLockedNotice(title, message);
 
-    internal Task<bool> PromptForAppUpdateAsync(AppVersion version, CancellationToken cancellationToken) =>
-        AppUpdatePromptPopup.PromptAsync(
+    internal Task<bool> PromptForAppUpdateAsync(AppVersion version, CancellationToken cancellationToken)
+    {
+        _appUpdatePromptWindow?.Close();
+        return AppUpdatePromptPopup.PromptAsync(
             this,
             version,
             PopupScale,
             Text,
-            w => _appUpdatePromptWindow = w,
+            popup => _appUpdatePromptWindow = popup,
+            popup =>
+            {
+                if (ReferenceEquals(_appUpdatePromptWindow, popup))
+                {
+                    _appUpdatePromptWindow = null;
+                }
+            },
             cancellationToken);
+    }
 
     private void ShowSessionDetailsWindow(SessionDetailsRequestedEventArgs args)
     {
         _sessionDetailsWindow?.Close();
-        _sessionDetailsWindow = SessionDetailsPopup.Show(
+        SessionDetailsPopup.Show(
             this,
             args,
             PopupScale,
             Text,
-            UnknownText);
-        _sessionDetailsWindow.Closed += (_, _) => _sessionDetailsWindow = null;
+            UnknownText,
+            popup => _sessionDetailsWindow = popup,
+            popup =>
+            {
+                if (ReferenceEquals(_sessionDetailsWindow, popup))
+                {
+                    _sessionDetailsWindow = null;
+                }
+            });
     }
 
     private void ShowResetCreditDetailsWindow() =>
@@ -722,15 +739,22 @@ public sealed partial class MainWindow : Window
             ? SettingsView.ToggleSidebarHotkeyButton
             : SettingsView.ToggleHotkeyButton;
 
-        _shortcutWindow = HotkeyCapturePopup.Show(
+        HotkeyCapturePopup.Show(
             this,
             target,
             targetButton,
             otherButton,
             PopupScale,
             Text,
-            Brush);
-        _shortcutWindow.Closed += (_, _) => _shortcutWindow = null;
+            Brush,
+            popup => _shortcutWindow = popup,
+            popup =>
+            {
+                if (ReferenceEquals(_shortcutWindow, popup))
+                {
+                    _shortcutWindow = null;
+                }
+            });
     }
 
     private void ShowCodexUpdateDetailsWindow()
@@ -789,7 +813,7 @@ public sealed partial class MainWindow : Window
 
     private void SaveStyleButton_Click(object sender, RoutedEventArgs args)
     {
-        _gaugeColorPickerPopup.Close();
+        CloseGaugeColorWindow(discardPendingColor: false);
         _selectedGaugeColor = _previewGaugeColor;
         _settingsStore.Update(config =>
         {
@@ -802,6 +826,16 @@ public sealed partial class MainWindow : Window
                 StyleConfig.DefaultGaugeAnimation);
         });
         ShowHudView();
+    }
+
+    private void CloseGaugeColorWindow(bool discardPendingColor = true)
+    {
+        if (discardPendingColor)
+        {
+            _previewGaugeColor = _selectedGaugeColor;
+        }
+
+        _gaugeColorPickerPopup.Close();
     }
 
     private static string ReadStyleOption(ComboBox comboBox, string fallback) =>

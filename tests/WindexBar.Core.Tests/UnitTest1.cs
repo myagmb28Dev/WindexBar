@@ -2125,6 +2125,9 @@ public sealed class ReleaseWorkflowTests
         Assert.Contains("Update now", promptPopup, StringComparison.Ordinal);
         Assert.Contains("Later", promptPopup, StringComparison.Ordinal);
         Assert.Contains("HasOpenAppUpdatePrompt", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("_appUpdatePromptWindow?.Close();", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("ReferenceEquals(_appUpdatePromptWindow, popup)", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("onWindowClosed(popup);", promptPopup, StringComparison.Ordinal);
 
         var trayService = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "TrayIconService.cs")));
         Assert.Contains("_statusWindow?.HasOpenAppUpdatePrompt == true", trayService, StringComparison.Ordinal);
@@ -2309,9 +2312,12 @@ public sealed class ReleaseWorkflowTests
     [Fact]
     public void GaugeColorAndBrightnessChangesRefreshTheStylePreviewImmediately()
     {
+        var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "MainWindow.xaml.cs")));
         var colorPicker = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "Dialogs", "GaugeColorPickerPopup.cs")));
         var colorWindowStart = colorPicker.IndexOf("public void Show(", StringComparison.Ordinal);
         var colorWindowEnd = colorPicker.IndexOf("public static global::Windows.UI.Color NormalizeGaugeColorBrightness", colorWindowStart, StringComparison.Ordinal);
+        var closeWindowStart = mainWindow.IndexOf("private void CloseGaugeColorWindow", StringComparison.Ordinal);
+        var closeWindowEnd = mainWindow.IndexOf("private static string ReadStyleOption", closeWindowStart, StringComparison.Ordinal);
 
         Assert.True(colorWindowStart >= 0 && colorWindowEnd > colorWindowStart);
         var colorWindow = colorPicker[colorWindowStart..colorWindowEnd];
@@ -2322,6 +2328,30 @@ public sealed class ReleaseWorkflowTests
         Assert.Contains("CloseCandidateColor(keepCandidate: false)", colorWindow, StringComparison.Ordinal);
         Assert.Contains("onColorChanged(initialPreviewColor);", colorWindow, StringComparison.Ordinal);
         Assert.Contains("closedWithoutAction", colorWindow, StringComparison.Ordinal);
+        Assert.True(closeWindowStart >= 0 && closeWindowEnd > closeWindowStart);
+        var closeWindow = mainWindow[closeWindowStart..closeWindowEnd];
+        Assert.Contains("if (discardPendingColor)", closeWindow, StringComparison.Ordinal);
+        Assert.Contains("_previewGaugeColor = _selectedGaugeColor;", closeWindow, StringComparison.Ordinal);
+        Assert.Contains("CloseGaugeColorWindow(discardPendingColor: false);", mainWindow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PopupTrackingRegistersBeforeActivationAndIgnoresStaleClosedEvents()
+    {
+        var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "MainWindow.xaml.cs")));
+        var sessionPopup = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "Dialogs", "SessionDetailsPopup.cs")));
+        var hotkeyPopup = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "Dialogs", "HotkeyCapturePopup.cs")));
+
+        Assert.Contains("ReferenceEquals(_sessionDetailsWindow, popup)", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("ReferenceEquals(_shortcutWindow, popup)", mainWindow, StringComparison.Ordinal);
+
+        var sessionCreated = sessionPopup.IndexOf("onWindowCreated(popup);", StringComparison.Ordinal);
+        var sessionActivated = sessionPopup.IndexOf("popup.Activate();", StringComparison.Ordinal);
+        Assert.True(sessionCreated >= 0 && sessionActivated > sessionCreated);
+
+        var hotkeyCreated = hotkeyPopup.IndexOf("onWindowCreated(popup);", StringComparison.Ordinal);
+        var hotkeyActivated = hotkeyPopup.IndexOf("popup.Activate();", StringComparison.Ordinal);
+        Assert.True(hotkeyCreated >= 0 && hotkeyActivated > hotkeyCreated);
     }
 
     [Fact]

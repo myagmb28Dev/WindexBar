@@ -13,7 +13,8 @@ public static class AppUpdatePromptPopup
         AppVersion version,
         double popupScale,
         Func<string, string, string> text,
-        Action<Window?> onWindowCreated,
+        Action<Window> onWindowCreated,
+        Action<Window> onWindowClosed,
         CancellationToken cancellationToken)
     {
         var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -68,7 +69,7 @@ public static class AppUpdatePromptPopup
         popup.Closed += (_, _) =>
         {
             completion.TrySetResult(false);
-            onWindowCreated(null);
+            onWindowClosed(popup);
         };
 
         var dispatcher = ownerWindow.DispatcherQueue;

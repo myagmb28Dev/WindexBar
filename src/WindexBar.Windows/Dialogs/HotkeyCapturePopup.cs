@@ -19,7 +19,9 @@ internal static class HotkeyCapturePopup
         Button otherButton,
         double popupScale,
         Func<string, string, string> text,
-        Func<byte, byte, byte, byte, SolidColorBrush> brush)
+        Func<byte, byte, byte, byte, SolidColorBrush> brush,
+        Action<Window> onWindowCreated,
+        Action<Window> onWindowClosed)
     {
         var candidate = HotkeyShortcut.NormalizeOrDefault(
             targetButton.Content as string,
@@ -73,6 +75,7 @@ internal static class HotkeyCapturePopup
             logicalWidth: 290,
             logicalHeight: 175);
 
+        onWindowCreated(popup);
         captureButton.KeyDown += (_, keyArgs) =>
         {
             var keyName = HotkeyKeyMapper.GetKeyName((uint)keyArgs.Key);
@@ -115,6 +118,7 @@ internal static class HotkeyCapturePopup
         };
         cancelButton.Click += (_, _) => popup.Close();
         captureButton.Loaded += (_, _) => captureButton.Focus(FocusState.Programmatic);
+        popup.Closed += (_, _) => onWindowClosed(popup);
         popup.Activate();
         return popup;
     }

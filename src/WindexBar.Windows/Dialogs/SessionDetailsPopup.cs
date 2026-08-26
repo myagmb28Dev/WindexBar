@@ -13,7 +13,9 @@ internal static class SessionDetailsPopup
         SessionDetailsRequestedEventArgs args,
         double popupScale,
         Func<string, string, string> text,
-        string unknownText)
+        string unknownText,
+        Action<Window> onWindowCreated,
+        Action<Window> onWindowClosed)
     {
         var session = args.Session;
         var detailsPanel = new StackPanel { Spacing = 9 };
@@ -82,7 +84,9 @@ internal static class SessionDetailsPopup
             logicalWidth: 330,
             logicalHeight: 340);
 
+        onWindowCreated(popup);
         closeButton.Click += (_, _) => popup.Close();
+        popup.Closed += (_, _) => onWindowClosed(popup);
         popup.Activate();
         return popup;
     }
