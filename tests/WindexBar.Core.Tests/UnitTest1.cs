@@ -2113,6 +2113,7 @@ public sealed class ReleaseWorkflowTests
     {
         var app = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "App.xaml.cs")));
         var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "MainWindow.xaml.cs")));
+        var promptPopup = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "Dialogs", "AppUpdatePromptPopup.cs")));
 
         var promptIndex = app.IndexOf("PromptForAppUpdateAsync", StringComparison.Ordinal);
         var installerIndex = app.IndexOf("Process.Start(new ProcessStartInfo", StringComparison.Ordinal);
@@ -2121,8 +2122,8 @@ public sealed class ReleaseWorkflowTests
         Assert.Contains("if (!installNow", app, StringComparison.Ordinal);
         Assert.Contains("_deferredAppUpdateVersion", app, StringComparison.Ordinal);
         Assert.Contains("/FORCECLOSEAPPLICATIONS", app, StringComparison.Ordinal);
-        Assert.Contains("Update now", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("Later", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("Update now", promptPopup, StringComparison.Ordinal);
+        Assert.Contains("Later", promptPopup, StringComparison.Ordinal);
         Assert.Contains("HasOpenAppUpdatePrompt", mainWindow, StringComparison.Ordinal);
 
         var trayService = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "TrayIconService.cs")));
@@ -2133,36 +2134,35 @@ public sealed class ReleaseWorkflowTests
     public void SidebarUsesAnUnconstrainedPopupWithoutResizingTheMainWindow()
     {
         var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "MainWindow.xaml.cs")));
+        var sidebarController = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "Controllers", "SidebarController.cs")));
 
-        Assert.Contains("Child = SideBarPanel", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("HorizontalOffset = -SideBarVisualWidth", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("VerticalOffset = TitleBarClientHeight", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("ShouldConstrainToRootBounds = false", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("_sideBarPanel", sidebarController, StringComparison.Ordinal);
+        Assert.Contains("HorizontalOffset = -SideBarVisualWidth", sidebarController, StringComparison.Ordinal);
+        Assert.Contains("VerticalOffset = TitleBarClientHeight", sidebarController, StringComparison.Ordinal);
+        Assert.Contains("ShouldConstrainToRootBounds = false", sidebarController, StringComparison.Ordinal);
         Assert.Contains("NavigateFromSideBar(", mainWindow, StringComparison.Ordinal);
         Assert.Contains("WindowCloseBehavior.ActivateForInput(this);", mainWindow, StringComparison.Ordinal);
         Assert.Contains("var scrollViewer = VisibleScrollViewer();", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("scrollViewer.IsTabStop = true;", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("scrollViewer.Focus(FocusState.Programmatic)", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("_sideBarHoverPollTimer = new DispatcherTimer", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("PollSideBarHoverRegion", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("GetCursorPos(out var cursor)", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("isOverExternalRegion || isOverInternalRegion", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("_sideBarHoverPollTimer = new DispatcherTimer", sidebarController, StringComparison.Ordinal);
+        Assert.Contains("PollSideBarHoverRegion", sidebarController, StringComparison.Ordinal);
+        Assert.Contains("GetCursorPos(out var cursor)", sidebarController, StringComparison.Ordinal);
+        Assert.Contains("isOverExternalRegion || isOverInternalRegion", sidebarController, StringComparison.Ordinal);
         Assert.Contains("RootLayout.SizeChanged += RootLayout_SizeChanged;", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("_settingsStore.Config.Sidebar.ShowOnHover", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("SideBarPopup.XamlRoot = RootLayout.XamlRoot", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("SideBarPopup.IsOpen != shouldOpenSideBar", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("RootLayout.ActualHeight - TitleBarClientHeight - SideBarBottomMargin", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("SideBarPanel.Height = sideBarHeight", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("_settingsStore.Config.Sidebar.ShowOnHover", sidebarController, StringComparison.Ordinal);
+        Assert.Contains("_sideBarPopup.XamlRoot = _rootLayout.XamlRoot", sidebarController, StringComparison.Ordinal);
+        Assert.Contains("_sideBarPopup.IsOpen != shouldOpenSideBar", sidebarController, StringComparison.Ordinal);
+        Assert.Contains("_rootLayout.ActualHeight - TitleBarClientHeight - SideBarBottomMargin", sidebarController, StringComparison.Ordinal);
+        Assert.Contains("_sideBarPanel.Height = sideBarHeight", sidebarController, StringComparison.Ordinal);
         Assert.DoesNotContain("OnSideBarScrollNavigationKeyDown", mainWindow, StringComparison.Ordinal);
         Assert.DoesNotContain("SideBarHoverTarget", mainWindow, StringComparison.Ordinal);
         Assert.DoesNotContain("SideBarPanel.PointerEntered", mainWindow, StringComparison.Ordinal);
         Assert.DoesNotContain("SideBarColumn", mainWindow, StringComparison.Ordinal);
 
-        var toggleStart = mainWindow.IndexOf("public void ToggleSideBar()", StringComparison.Ordinal);
-        var toggleEnd = mainWindow.IndexOf("private bool IsSideBarHoverRevealEnabled", toggleStart, StringComparison.Ordinal);
+        var toggleStart = sidebarController.IndexOf("public void ToggleSideBar()", StringComparison.Ordinal);
+        var toggleEnd = sidebarController.IndexOf("public void ApplySideBarHoverPreference()", toggleStart, StringComparison.Ordinal);
         Assert.True(toggleStart >= 0 && toggleEnd > toggleStart);
-        Assert.Contains("if (IsSideBarHoverRevealEnabled)", mainWindow[toggleStart..toggleEnd], StringComparison.Ordinal);
-        Assert.DoesNotContain("ResizeForCurrentView();", mainWindow[toggleStart..toggleEnd], StringComparison.Ordinal);
+        Assert.Contains("if (IsSideBarHoverRevealEnabled)", sidebarController[toggleStart..toggleEnd], StringComparison.Ordinal);
+        Assert.DoesNotContain("ResizeForCurrentView();", sidebarController[toggleStart..toggleEnd], StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2272,7 +2272,17 @@ public sealed class ReleaseWorkflowTests
             "WindexBar.Windows",
             "Controllers",
             "SettingsController.cs")));
+        var sidebarController = File.ReadAllText(FindRepositoryFile(Path.Combine(
+            "src",
+            "WindexBar.Windows",
+            "Controllers",
+            "SidebarController.cs")));
         var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "MainWindow.xaml.cs")));
+        var scrollBarManager = File.ReadAllText(FindRepositoryFile(Path.Combine(
+            "src",
+            "WindexBar.Windows",
+            "UI",
+            "TransientScrollBarManager.cs")));
         var featureViewHelpers = File.ReadAllText(FindRepositoryFile(Path.Combine(
             "src",
             "WindexBar.Windows",
@@ -2285,32 +2295,32 @@ public sealed class ReleaseWorkflowTests
         Assert.Contains("ApplyStyleTooltips();", mainWindow, StringComparison.Ordinal);
         Assert.Contains("SaveStyleButton.Content = Text(\"Save\", \"\\uC800\\uC7A5\");", mainWindow, StringComparison.Ordinal);
         Assert.Contains("ToolTipService.SetToolTip", featureViewHelpers, StringComparison.Ordinal);
-        Assert.Contains("if (!IsArrowKeyInputControl(args.OriginalSource as DependencyObject))", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("or ButtonBase", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("ModeLockNoticePopup = new Popup", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("Width = ModeLockNoticeWidth", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("IsHitTestVisible = false", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("IsLightDismissEnabled = false", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("ModeLockNoticePopup.IsOpen = true", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("ModeLockNoticeDurationMilliseconds", mainWindow, StringComparison.Ordinal);
-        Assert.DoesNotContain("_modeLockNoticeWindow", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("if (!TransientScrollBarManager.IsArrowKeyInputControl(args.OriginalSource as DependencyObject))", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("or ButtonBase", scrollBarManager, StringComparison.Ordinal);
+        Assert.Contains("_modeLockNoticePopup = new Popup", sidebarController, StringComparison.Ordinal);
+        Assert.Contains("Width = ModeLockNoticeWidth", sidebarController, StringComparison.Ordinal);
+        Assert.Contains("IsHitTestVisible = false", sidebarController, StringComparison.Ordinal);
+        Assert.Contains("IsLightDismissEnabled = false", sidebarController, StringComparison.Ordinal);
+        Assert.Contains("_modeLockNoticePopup.IsOpen = true", sidebarController, StringComparison.Ordinal);
+        Assert.Contains("ModeLockNoticeDurationMilliseconds", sidebarController, StringComparison.Ordinal);
+        Assert.DoesNotContain("_modeLockNoticeWindow", sidebarController, StringComparison.Ordinal);
     }
 
     [Fact]
     public void GaugeColorAndBrightnessChangesRefreshTheStylePreviewImmediately()
     {
-        var mainWindow = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "MainWindow.xaml.cs")));
-        var colorWindowStart = mainWindow.IndexOf("private void ShowGaugeColorWindow()", StringComparison.Ordinal);
-        var colorWindowEnd = mainWindow.IndexOf("private static global::Windows.UI.Color NormalizeGaugeColorBrightness", colorWindowStart, StringComparison.Ordinal);
+        var colorPicker = File.ReadAllText(FindRepositoryFile(Path.Combine("src", "WindexBar.Windows", "Dialogs", "GaugeColorPickerPopup.cs")));
+        var colorWindowStart = colorPicker.IndexOf("public void Show(", StringComparison.Ordinal);
+        var colorWindowEnd = colorPicker.IndexOf("public static global::Windows.UI.Color NormalizeGaugeColorBrightness", colorWindowStart, StringComparison.Ordinal);
 
         Assert.True(colorWindowStart >= 0 && colorWindowEnd > colorWindowStart);
-        var colorWindow = mainWindow[colorWindowStart..colorWindowEnd];
+        var colorWindow = colorPicker[colorWindowStart..colorWindowEnd];
         Assert.Contains("void PreviewCandidateColor()", colorWindow, StringComparison.Ordinal);
-        Assert.Contains("_previewGaugeColor = candidateColor;", colorWindow, StringComparison.Ordinal);
+        Assert.Contains("candidateColor = currentColor;", colorWindow, StringComparison.Ordinal);
         Assert.Equal(3, Regex.Matches(colorWindow, "PreviewCandidateColor\\(\\);").Count);
         Assert.Contains("CloseCandidateColor(keepCandidate: true)", colorWindow, StringComparison.Ordinal);
         Assert.Contains("CloseCandidateColor(keepCandidate: false)", colorWindow, StringComparison.Ordinal);
-        Assert.Contains("_previewGaugeColor = initialPreviewColor;", colorWindow, StringComparison.Ordinal);
+        Assert.Contains("onColorChanged(initialPreviewColor);", colorWindow, StringComparison.Ordinal);
         Assert.Contains("closedWithoutAction", colorWindow, StringComparison.Ordinal);
     }
 
