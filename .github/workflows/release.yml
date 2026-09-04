@@ -386,6 +386,15 @@ jobs:
 
           'enabled=true' >> $env:GITHUB_OUTPUT
 
+      - name: Check out repository
+        if: steps.winget.outputs.enabled == 'true'
+        uses: actions/checkout@v7
+
+      - name: Synchronize WinGet fork
+        if: steps.winget.outputs.enabled == 'true'
+        shell: pwsh
+        run: .\scripts\sync-winget-fork.ps1
+
       - name: Download WinGetCreate
         if: steps.winget.outputs.enabled == 'true'
         shell: pwsh
