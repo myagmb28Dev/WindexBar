@@ -65,6 +65,7 @@ public static class CodexSessionStateReader
         var sessionsRoot = Path.Combine(codexHome, "sessions");
         if (!Directory.Exists(sessionsRoot))
         {
+            PruneDeletedSessionFiles(sessionsRoot);
             return null;
         }
 
@@ -80,10 +81,14 @@ public static class CodexSessionStateReader
         var sessions = new List<CodexSessionUsageSnapshot>();
         var sessionNames = ReadSessionNames(codexHome);
 
-        foreach (var file in Directory.EnumerateFiles(sessionsRoot, "rollout-*.jsonl", options)
-                     .Select(path => new FileInfo(path))
-                     .OrderByDescending(file => file.LastWriteTimeUtc)
-                     .Take(MaxSessionFilesToScan))
+        var sessionFiles = Directory.EnumerateFiles(sessionsRoot, "rollout-*.jsonl", options)
+            .Select(path => new FileInfo(path))
+            .OrderByDescending(file => file.LastWriteTimeUtc)
+            .Take(MaxSessionFilesToScan)
+            .ToArray();
+        PruneDeletedSessionFiles(sessionsRoot);
+
+        foreach (var file in sessionFiles)
         {
             var state = ReadSessionFile(file, out var isSubagent);
             if (state is null || isSubagent)
@@ -142,6 +147,20 @@ public static class CodexSessionStateReader
                 .OrderByDescending(session => session.UpdatedAt)
                 .ToArray()
         };
+    }
+
+    private static void PruneDeletedSessionFiles(string sessionsRoot)
+    {
+        var normalizedRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(sessionsRoot))
+            + Path.DirectorySeparatorChar;
+        foreach (var cachedPath in SessionFileCache.Keys)
+        {
+            if (cachedPath.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase)
+                && !File.Exists(cachedPath))
+            {
+                SessionFileCache.TryRemove(cachedPath, out _);
+            }
+        }
     }
 
     private static IReadOnlyDictionary<string, string> ReadSessionNames(string codexHome)

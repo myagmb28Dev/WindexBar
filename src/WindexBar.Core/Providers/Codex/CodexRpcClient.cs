@@ -97,9 +97,20 @@ public sealed class CodexRpcClient : IAsyncDisposable
 
     public async Task<RpcThreadListResponse> FetchThreadsAsync(CancellationToken cancellationToken)
     {
+        return await FetchThreadsAsync(int.MaxValue, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<RpcThreadListResponse> FetchRecentThreadsAsync(CancellationToken cancellationToken)
+    {
+        return await FetchThreadsAsync(1, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<RpcThreadListResponse> FetchThreadsAsync(int maxPages, CancellationToken cancellationToken)
+    {
         var response = new RpcThreadListResponse();
         var seenCursors = new HashSet<string>(StringComparer.Ordinal);
         string? cursor = null;
+        var pageCount = 0;
 
         do
         {
@@ -124,8 +135,11 @@ public sealed class CodexRpcClient : IAsyncDisposable
                 cancellationToken).ConfigureAwait(false);
             response.Data.AddRange(page.Data);
             cursor = page.NextCursor;
+            pageCount++;
         }
-        while (!string.IsNullOrWhiteSpace(cursor) && seenCursors.Add(cursor));
+        while (pageCount < maxPages
+            && !string.IsNullOrWhiteSpace(cursor)
+            && seenCursors.Add(cursor));
 
         return response;
     }

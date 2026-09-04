@@ -122,6 +122,32 @@ public sealed class CodexRpcClientTests
     }
 
     [Fact]
+    public async Task FetchesOnlyFirstThreadListPageForRecentSessions()
+    {
+        var transport = new FakeCodexRpcTransport(
+            OnRequest(1, new { ok = true }),
+            OnRequest(2, new
+            {
+                data = new[] { new { id = "session-1" } },
+                nextCursor = "next-page"
+            }),
+            OnRequest(3, new
+            {
+                data = new[] { new { id = "session-2" } },
+                nextCursor = (string?)null
+            }));
+
+        await using var client = new CodexRpcClient(transport, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        await client.InitializeAsync(CancellationToken.None);
+
+        var threads = await client.FetchRecentThreadsAsync(CancellationToken.None);
+
+        var thread = Assert.Single(threads.Data);
+        Assert.Equal("session-1", thread.Id);
+        Assert.DoesNotContain(transport.Writes, write => write.Contains("\"cursor\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task ThrowsTimeoutForMissingReply()
     {
         var transport = new FakeCodexRpcTransport();
@@ -1641,7 +1667,7 @@ public sealed class CodexSessionStateReaderTests
     }
 
     [Fact]
-    public async Task CodexCliFetchExcludesDeletedAndUnavailableProjectSessions()
+    public async Task CodexCliFetchUsesLocalRolloutsWhenRpcAndProjectPathsAreStale()
     {
         var testRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         var binDir = Path.Combine(testRoot, "bin");
@@ -1706,7 +1732,8 @@ public sealed class CodexSessionStateReaderTests
                     data = new[]
                     {
                         new { id = "active-session", name = "Active", cwd = activeProject },
-                        new { id = "missing-session", name = "Missing", cwd = missingProject }
+                        new { id = "missing-session", name = "Missing", cwd = missingProject },
+                        new { id = "deleted-session", name = "Deleted", cwd = activeProject }
                     },
                     nextCursor = (string?)null
                 })
@@ -1727,10 +1754,15 @@ public sealed class CodexSessionStateReaderTests
 
         var result = await strategy.FetchAsync(context, CancellationToken.None);
 
-        var session = Assert.Single(result.Usage.Sessions!);
-        Assert.Equal("active-session", session.SessionId);
-        Assert.Equal("Active", session.SessionName);
-        Assert.Equal(activeProject, session.ProjectPath);
+        Assert.Equal(3, result.Usage.Sessions!.Count);
+        var active = Assert.Single(result.Usage.Sessions, session => session.SessionId == "active-session");
+        Assert.Equal("Active", active.SessionName);
+        Assert.Equal(activeProject, active.ProjectPath);
+        var missingProjectSession = Assert.Single(result.Usage.Sessions, session => session.SessionId == "missing-session");
+        Assert.Equal("Missing", missingProjectSession.SessionName);
+        Assert.Equal(missingProject, missingProjectSession.ProjectPath);
+        Assert.Contains(result.Usage.Sessions, session => session.SessionId == "stale-session");
+        Assert.DoesNotContain(result.Usage.Sessions, session => session.SessionId == "deleted-session");
     }
 
     [Fact]
@@ -2342,6 +2374,10 @@ public sealed class ReleaseWorkflowTests
             "MainWindow.xaml.cs")));
 
         Assert.Contains("TrayIconService.Start();", app, StringComparison.Ordinal);
+        Assert.Contains("UsageStore.StartBackgroundRefresh();", app, StringComparison.Ordinal);
+        Assert.True(
+            app.IndexOf("UsageStore.StartBackgroundRefresh();", StringComparison.Ordinal)
+                < app.IndexOf("TrayIconService.Start();", StringComparison.Ordinal));
         Assert.DoesNotContain("TrayIconService.ShowStatusWindow();", app, StringComparison.Ordinal);
         Assert.Contains("ApplyInitialWindowSize();", mainWindow, StringComparison.Ordinal);
         Assert.Contains("RootLayout.Loaded += OnRootLayoutLoaded;", mainWindow, StringComparison.Ordinal);
@@ -2515,6 +2551,7 @@ public sealed class ReleaseWorkflowTests
         Assert.Contains("Grid.SetRow(titleDivider, 1);", hudView, StringComparison.Ordinal);
         Assert.Contains("Grid.SetRow(MetaText, 2);", hudView, StringComparison.Ordinal);
         Assert.Contains("Grid.SetRow(ModelContentPanel, 3);", hudView, StringComparison.Ordinal);
+        Assert.Contains("_currentSection.Visibility = model.Current.IsVisible", hudView, StringComparison.Ordinal);
         Assert.Contains("AddLabelValueRow(content, 4, \"Account\"", hudView, StringComparison.Ordinal);
         Assert.Contains("Grid.SetRow(ErrorText, 5);", hudView, StringComparison.Ordinal);
     }

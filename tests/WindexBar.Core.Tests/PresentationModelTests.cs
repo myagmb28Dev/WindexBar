@@ -25,6 +25,8 @@ public sealed class PresentationModelTests
         Assert.Equal("GPT 5.6", model.Header);
         Assert.Equal("75%", model.Current.Percent);
         Assert.Equal("60%", model.Weekly.Percent);
+        Assert.True(model.Current.IsVisible);
+        Assert.True(model.Weekly.IsVisible);
         Assert.Contains("사용", model.Current.Detail);
         Assert.Equal("제공자 비활성화", model.Meta);
         Assert.Equal("network error", model.Error);
@@ -107,6 +109,8 @@ public sealed class PresentationModelTests
 
         Assert.Equal("Codex", model.Header);
         Assert.Equal("unknown", model.Current.Percent);
+        Assert.False(model.Current.IsVisible);
+        Assert.True(model.Weekly.IsVisible);
     }
 
     [Fact]
@@ -133,5 +137,7 @@ public sealed class PresentationModelTests
         Assert.Equal("GPT-5.6 Sol XHigh", model.Header);
         Assert.Equal("unknown", model.Current.Percent);
         Assert.Equal("100%", model.Weekly.Percent);
+        Assert.False(model.Current.IsVisible);
+        Assert.True(model.Weekly.IsVisible);
     }
 }
