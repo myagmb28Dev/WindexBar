@@ -47,12 +47,12 @@ public sealed class CodexCliFetchStrategy : IProviderFetchStrategy
 
             try
             {
-                var threads = await client.FetchThreadsAsync(cancellationToken).ConfigureAwait(false);
+                var threads = await client.FetchRecentThreadsAsync(cancellationToken).ConfigureAwait(false);
                 sessions = FilterAndEnrichSessions(sessions, threads.Data);
             }
             catch (Exception) when (!cancellationToken.IsCancellationRequested)
             {
-                sessions = FilterUnavailableProjectSessions(sessions);
+                // Local rollout files remain authoritative when RPC metadata is unavailable.
             }
 
             var usage = CodexUsageMapper.MapUsage(limits, account, now);
@@ -68,7 +68,6 @@ public sealed class CodexCliFetchStrategy : IProviderFetchStrategy
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested && HasSessionRateLimits(sessionState))
         {
-            sessions = FilterUnavailableProjectSessions(sessions);
             var usage = EnrichWithSessionState(
                 new UsageSnapshot(null, null, now, null),
                 sessionState,
@@ -149,11 +148,7 @@ public sealed class CodexCliFetchStrategy : IProviderFetchStrategy
             .GroupBy(thread => thread.Id, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
 
-        var candidates = threadsById.Count == 0
-            ? sessions
-            : sessions.Where(session => threadsById.ContainsKey(session.SessionId));
-
-        return FilterUnavailableProjectSessions(candidates
+        return sessions
             .Select(session => threadsById.TryGetValue(session.SessionId, out var thread)
                 ? session with
                 {
@@ -161,24 +156,7 @@ public sealed class CodexCliFetchStrategy : IProviderFetchStrategy
                     ProjectPath = string.IsNullOrWhiteSpace(thread.Cwd) ? session.ProjectPath : thread.Cwd.Trim()
                 }
                 : session)
-            .ToArray());
-    }
-
-    private static IReadOnlyList<CodexSessionUsageSnapshot> FilterUnavailableProjectSessions(
-        IEnumerable<CodexSessionUsageSnapshot> sessions) =>
-        sessions
-            .Where(session => IsAvailableProjectPath(session.ProjectPath))
             .ToArray();
-
-    private static bool IsAvailableProjectPath(string? projectPath)
-    {
-        if (string.IsNullOrWhiteSpace(projectPath))
-        {
-            return true;
-        }
-
-        var normalized = projectPath.Trim();
-        return !Path.IsPathFullyQualified(normalized) || Directory.Exists(normalized);
     }
 
     private static string? ThreadDisplayName(RpcThreadSummary thread)

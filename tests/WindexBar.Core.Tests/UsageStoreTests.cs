@@ -127,6 +127,41 @@ public sealed class UsageStoreTests
         }
     }
 
+    [Fact]
+    public async Task DeletingSessionDirectoryTriggersPromptRefresh()
+    {
+        var codexHome = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var sessionDirectory = Path.Combine(codexHome, "sessions", "2026", "09", "04");
+        Directory.CreateDirectory(sessionDirectory);
+        await File.WriteAllTextAsync(Path.Combine(sessionDirectory, "rollout-test.jsonl"), "{}");
+
+        var strategy = new CountingProviderFetchStrategy(
+            FetchResult(10, 55),
+            FetchResult(20, 45));
+        using var store = new UsageStore(
+            TestSettings(),
+            new ProviderDescriptor(new ProviderFetchPipeline([strategy])),
+            weeklyLimitImpactTracker: null,
+            rateLimitAlertTracker: null,
+            codexHomeOverride: codexHome);
+
+        try
+        {
+            store.StartBackgroundRefresh();
+            await WaitUntilAsync(() => store.Snapshot?.Primary?.RemainingPercent == 90);
+
+            Directory.Delete(sessionDirectory, recursive: true);
+
+            await WaitUntilAsync(() => store.Snapshot?.Primary?.RemainingPercent == 80);
+            Assert.True(strategy.FetchCount >= 2);
+        }
+        finally
+        {
+            store.StopBackgroundRefresh();
+            Directory.Delete(codexHome, recursive: true);
+        }
+    }
+
     private static SettingsStore TestSettings()
     {
         var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");

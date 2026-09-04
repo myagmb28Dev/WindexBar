@@ -191,15 +191,15 @@ public sealed class UsageStore : IDisposable
             watchChanges: true);
         AddSessionStateWatcher(
             Path.Combine(codexHome, "sessions"),
-            "rollout-*.jsonl",
+            "*",
             includeSubdirectories: true,
-            NotifyFilters.FileName,
-            watchChanges: false);
+            NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size,
+            watchChanges: true);
         AddSessionStateWatcher(
             Path.Combine(codexHome, "archived_sessions"),
-            "rollout-*.jsonl",
+            "*",
             includeSubdirectories: true,
-            NotifyFilters.FileName,
+            NotifyFilters.FileName | NotifyFilters.DirectoryName,
             watchChanges: false);
     }
 

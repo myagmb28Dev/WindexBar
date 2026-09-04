@@ -80,19 +80,15 @@ internal sealed class HudViewControl : UserControl
         Grid.SetRow(MetaText, 2);
         content.Children.Add(MetaText);
 
-        ModelContentPanel = new Grid { RowSpacing = 4 };
-        for (var index = 0; index < 6; index++)
-        {
-            ModelContentPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        }
+        ModelContentPanel = new StackPanel { Spacing = 7 };
         Grid.SetRow(ModelContentPanel, 3);
         content.Children.Add(ModelContentPanel);
 
-        CurrentGauge = AddWindowSection(ModelContentPanel, 0, "current", out var currentLabel, out var currentFastIndicator, out var currentFastGlow, out var currentPercent, out var currentDetail);
+        CurrentGauge = AddWindowSection(ModelContentPanel, "current", out _currentSection, out var currentLabel, out var currentFastIndicator, out var currentFastGlow, out var currentPercent, out var currentDetail);
         CurrentLabelText = currentLabel;
         CurrentPercentText = currentPercent;
         CurrentDetailText = currentDetail;
-        WeeklyGauge = AddWindowSection(ModelContentPanel, 3, "weekly", out var weeklyLabel, out var weeklyFastIndicator, out var weeklyFastGlow, out var weeklyPercent, out var weeklyDetail);
+        WeeklyGauge = AddWindowSection(ModelContentPanel, "weekly", out _weeklySection, out var weeklyLabel, out var weeklyFastIndicator, out var weeklyFastGlow, out var weeklyPercent, out var weeklyDetail);
         WeeklyLabelText = weeklyLabel;
         WeeklyPercentText = weeklyPercent;
         WeeklyDetailText = weeklyDetail;
@@ -123,7 +119,7 @@ internal sealed class HudViewControl : UserControl
     }
 
     public ScrollViewer ScrollViewer { get; }
-    public Grid ModelContentPanel { get; }
+    public StackPanel ModelContentPanel { get; }
     public TextBlock HeaderText { get; }
     public TextBlock VersionText { get; }
     public TextBlock MetaText { get; }
@@ -140,6 +136,8 @@ internal sealed class HudViewControl : UserControl
     public GaugeBar WeeklyGauge { get; }
     private readonly Grid[] _fastIndicatorHosts;
     private readonly TextBlock[] _fastIndicatorGlows;
+    private readonly Grid _currentSection;
+    private readonly Grid _weeklySection;
     private readonly Storyboard _fastIndicatorPulse;
     private bool _isFastTierAppearanceActive;
 
@@ -153,8 +151,10 @@ internal sealed class HudViewControl : UserControl
         SetWindowLabels(currentLabel, weeklyLabel);
         CurrentPercentText.Text = model.Current.Percent;
         CurrentDetailText.Text = model.Current.Detail;
+        _currentSection.Visibility = model.Current.IsVisible ? Visibility.Visible : Visibility.Collapsed;
         WeeklyPercentText.Text = model.Weekly.Percent;
         WeeklyDetailText.Text = model.Weekly.Detail;
+        _weeklySection.Visibility = model.Weekly.IsVisible ? Visibility.Visible : Visibility.Collapsed;
     }
 
     public void SetWindowLabels(string currentLabel, string weeklyLabel)
@@ -194,20 +194,26 @@ internal sealed class HudViewControl : UserControl
     }
 
     private static GaugeBar AddWindowSection(
-        Grid root,
-        int row,
+        StackPanel root,
         string key,
+        out Grid section,
         out TextBlock label,
         out Grid fastIndicator,
         out TextBlock fastGlow,
         out TextBlock percent,
         out TextBlock detail)
     {
-        var header = new Grid { Margin = row == 0 ? new Thickness(0, 2, 0, 0) : new Thickness(0, 3, 0, 0) };
+        section = new Grid { RowSpacing = 4 };
+        for (var index = 0; index < 3; index++)
+        {
+            section.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        }
+        root.Children.Add(section);
+
+        var header = new Grid { Margin = new Thickness(0, 2, 0, 0) };
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        Grid.SetRow(header, row);
-        root.Children.Add(header);
+        section.Children.Add(header);
 
         var labelHost = new StackPanel
         {
@@ -250,15 +256,15 @@ internal sealed class HudViewControl : UserControl
         header.Children.Add(percent);
 
         var gauge = CreateGauge(key);
-        Grid.SetRow(gauge.Track, row + 1);
-        root.Children.Add(gauge.Track);
+        Grid.SetRow(gauge.Track, 1);
+        section.Children.Add(gauge.Track);
         detail = new TextBlock
         {
             Foreground = Brush(0xFF, 0xC9, 0xC4, 0xD2),
             TextWrapping = TextWrapping.Wrap
         };
-        Grid.SetRow(detail, row + 2);
-        root.Children.Add(detail);
+        Grid.SetRow(detail, 2);
+        section.Children.Add(detail);
         return gauge;
     }
 

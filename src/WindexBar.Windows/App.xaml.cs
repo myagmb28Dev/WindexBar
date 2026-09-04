@@ -77,6 +77,8 @@ public partial class App : WinApplication
             CodexCliUpdateService,
             DispatcherQueue.GetForCurrentThread());
         LogMessage("Tray icon service created.");
+        UsageStore.StartBackgroundRefresh();
+        LogMessage("Usage refresh started.");
         TrayIconService.Start();
         LogMessage("Tray icon service started.");
         _initialized = true;

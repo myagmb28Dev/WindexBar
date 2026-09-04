@@ -37,4 +37,30 @@ public sealed class CodexSessionStateReaderCachingTests
         Assert.Equal("xhigh", updated?.ActiveModel?.ReasoningEffort);
         Assert.NotSame(first.ActiveModel, updated?.ActiveModel);
     }
+
+    [Fact]
+    public void RemovesDeletedRolloutFromSubsequentSnapshots()
+    {
+        var codexHome = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var sessionDirectory = Path.Combine(codexHome, "sessions", "2026", "09", "04");
+        Directory.CreateDirectory(sessionDirectory);
+        File.WriteAllText(Path.Combine(codexHome, "config.toml"), "model = \"gpt-5.6-sol\"");
+        var sessionPath = Path.Combine(sessionDirectory, "rollout-deleted.jsonl");
+        File.WriteAllText(sessionPath, """
+        {"timestamp":"2026-09-04T00:00:00Z","type":"session_meta","payload":{"id":"deleted-session","thread_source":"user","source":"desktop"}}
+        {"timestamp":"2026-09-04T00:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":1200},"model_context_window":256000}}}
+        """);
+
+        var environment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["CODEX_HOME"] = codexHome
+        };
+        var beforeDelete = CodexSessionStateReader.ReadLatestState(environment);
+
+        Directory.Delete(sessionDirectory, recursive: true);
+        var afterDelete = CodexSessionStateReader.ReadLatestState(environment);
+
+        Assert.Single(beforeDelete!.Sessions!);
+        Assert.Empty(afterDelete!.Sessions!);
+    }
 }

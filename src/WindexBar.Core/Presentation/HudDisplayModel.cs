@@ -3,7 +3,7 @@ using WindexBar.Core.Providers.Codex;
 
 namespace WindexBar.Core.Presentation;
 
-public sealed record GaugeWindowDisplay(string Percent, string Detail, double TargetValue);
+public sealed record GaugeWindowDisplay(string Percent, string Detail, double TargetValue, bool IsVisible);
 
 public sealed record HudDisplayModel(
     string Header,
@@ -37,17 +37,21 @@ public static class HudDisplayModelFactory
             providerDisabled ? Text(language, "Provider disabled", "제공자 비활성화") : lastError ?? string.Empty,
             lastError ?? string.Empty,
             FormatIdentity(snapshot?.Identity, language),
-            FormatWindow(current, language, now),
-            FormatWindow(weekly, language, now),
+            FormatWindow(current, language, now, visibleWhenMissing: false),
+            FormatWindow(weekly, language, now, visibleWhenMissing: true),
             string.Equals(activeModel?.ServiceTier, "fast", StringComparison.OrdinalIgnoreCase));
     }
 
-    private static GaugeWindowDisplay FormatWindow(RateWindow? window, string language, DateTimeOffset now)
+    private static GaugeWindowDisplay FormatWindow(
+        RateWindow? window,
+        string language,
+        DateTimeOffset now,
+        bool visibleWhenMissing)
     {
         if (window is null)
         {
             var unknown = Text(language, "unknown", "알 수 없음");
-            return new GaugeWindowDisplay(unknown, unknown, 0);
+            return new GaugeWindowDisplay(unknown, unknown, 0, visibleWhenMissing);
         }
 
         var reset = window.ResetsAt is null
@@ -58,7 +62,7 @@ public static class HudDisplayModelFactory
         var detail = IsKorean(language)
             ? $"{window.UsedPercent:0.#}% 사용{reset}"
             : $"Used {window.UsedPercent:0.#}%{reset}";
-        return new GaugeWindowDisplay($"{window.RemainingPercent:0.#}%", detail, window.RemainingPercent);
+        return new GaugeWindowDisplay($"{window.RemainingPercent:0.#}%", detail, window.RemainingPercent, true);
     }
 
     private static string FormatResetDescription(DateTimeOffset resetsAt, string language, DateTimeOffset now)
